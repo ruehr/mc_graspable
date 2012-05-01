@@ -486,7 +486,7 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
     pcl::fromROSMsg(msg, *cloud);
 
     //get maxima in z
-    double scaling = 50; // 1 cm = 100
+    double scaling = 20; // 1 cm = 100
 
     //! get the top points' z coord per bin
     for (size_t i=0; i < cloud->points.size(); ++i)
@@ -668,6 +668,7 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
                 {
                     //std::cout << field_idx[addr].size() << " " << pt.x() << " " << pt.y() << endl;
                     pos_eigen_zcol(field_idx[addr], tops, evec, eval, false); //((pt - tf::Vector3(-1.63,1.33,.86)).length() < 0.05));
+                    //  evec.push_back(tf::Vector3(1,1,1));
 
                     tf::Vector3 mean(0,0,0);
                     for (std::vector<int>::iterator it = field_idx[addr].begin(); it != field_idx[addr].end(); it ++)
@@ -675,7 +676,7 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
 
                     mean = mean / field_idx[addr].size();
 
-                    if ((fabs(evec[0].x()) > 0.0000001) && (fabs(evec[0].y()) > 0.0000001))
+                    //if ((fabs(evec[0].x()) > 0.0000001) && (fabs(evec[0].y()) > 0.0000001))
                     for (std::vector<int>::iterator it = field_idx[addr].begin(); it != field_idx[addr].end(); it ++)
                     {
                         // project vector on main axis
@@ -683,6 +684,7 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
                         if (max_c == min_c)
                             max_c += 0.00001;
                         double col = cur.dot(evec[0]);
+                        col = cur.length();
                         if (t == 0) {
                         if (col > max_c)
                             max_c = col;
@@ -690,9 +692,11 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
                             min_c = col;
                         }
                         col = (col - min_c) / (max_c - min_c) * 255;
-                        tops->points[*it].r = col;
-                        tops->points[*it].g = -col;
-                        tops->points[*it].b = 0;
+                        if ((t ==1) && (col > 50)) {
+                            tops->points[*it].r = 255;
+                            tops->points[*it].g = 0;
+                            tops->points[*it].b = 0;
+                        }
                     }
                 }
                     //projected.push_back(pcl_to_zcol(cloud->points[*it]));
