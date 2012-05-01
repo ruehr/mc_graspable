@@ -1,0 +1,21 @@
+<package>
+  <description brief="mc_graspable">
+
+     mc_graspable
+
+  </description>
+  <author>ruehr</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/mc_graspable</url>
+  <depend package="tf"/>
+  <depend package="pcl"/>
+  <depend package="pcl_ros"/>
+  <depend package="visualization_msgs"/>
+  <depend package="sensor_msgs"/>
+  <depend package="geometry_msgs"/>
+  <depend package="eigen"/>
+
+</package>
+
+
