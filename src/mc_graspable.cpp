@@ -180,7 +180,7 @@ void calculateSampleCovariance(const MatrixBase<Derived>& x, const MatrixBase<De
 
 }
 
-MatrixXd pos_covar(std::vector<tf::Vector3> points)
+MatrixXd pos_covar_xy(std::vector<tf::Vector3> points)
 {
     MatrixXd esamples(points.size(),3);
     for (size_t n=0; n < points.size(); ++n)
@@ -197,9 +197,9 @@ MatrixXd pos_covar(std::vector<tf::Vector3> points)
     return ret;
 }
 
-void pos_eigen(std::vector<tf::Vector3> points, std::vector<tf::Vector3> &evec, std::vector<double> &eval)
+void pos_eigen_xy(std::vector<tf::Vector3> points, std::vector<tf::Vector3> &evec, std::vector<double> &eval)
 {
-    Matrix<double,3,3> covarMat = pos_covar(points);
+    Matrix<double,3,3> covarMat = pos_covar_xy(points);
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double,3,3> >
     eigenSolver(covarMat);
     //cout << "vec" << endl << eigenSolver.eigenvectors() << endl;
@@ -213,6 +213,34 @@ void pos_eigen(std::vector<tf::Vector3> points, std::vector<tf::Vector3> &evec, 
 }
 
 
+// z plus red/blue axis
+tf::Vector3 pcl_to_zcol(pcl::PointXYZRGB pt)
+{
+    return tf::Vector3(pt.z, (pt.b - pt.r) / 1500.0f, 0);
+    //return tf::Vector3(pt.z, 0, 0);
+}
+
+void pos_eigen_zcol(std::vector<int> &idx, pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, std::vector<tf::Vector3> &evec, std::vector<double> &eval, bool print = false)
+{
+    std::vector<tf::Vector3> projected; // points projected to z+col space
+    for (std::vector<int>::iterator it = idx.begin(); it != idx.end(); it ++)
+        projected.push_back(pcl_to_zcol(cloud->points[*it]));
+
+    Matrix<double,3,3> covarMat = pos_covar_xy(projected);
+
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double,3,3> >
+    eigenSolver(covarMat);
+    MatrixXf::Index  maxIndex;
+    eigenSolver.eigenvalues().maxCoeff(&maxIndex);
+    MatrixXd max = eigenSolver.eigenvectors().col(maxIndex);
+    if (print) {
+      cout << "vec" << endl << eigenSolver.eigenvectors() << endl;
+      cout << "val" << endl << eigenSolver.eigenvalues() << endl;
+      cout << "max " << endl << max << endl;
+    }
+    tf::Vector3 maxVec(max(0),max(1),max(2));
+    evec.push_back(maxVec);
+}
 
 
 /*void getCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, std::string frame_id, ros::Time after, ros::Time *tm)
@@ -251,7 +279,7 @@ void pos_eigen(std::vector<tf::Vector3> points, std::vector<tf::Vector3> &evec, 
 }*/
 
 
-// get the high objects that have a rim
+//! get top grasp points on rims of objects
 void classify_cloud(sensor_msgs::PointCloud2 msg)
 {
     ROS_INFO("classify");
@@ -259,6 +287,7 @@ void classify_cloud(sensor_msgs::PointCloud2 msg)
     std::vector<tf::Vector3> field_topvec[100 * 100];
     std::vector<tf::Vector3> field_botvec[100 * 100];
 
+    // field of maximum z values in an x/y bin
     for (size_t i = 0; i < 100*100; ++i)
     {
         field[i] = 0;
@@ -268,10 +297,13 @@ void classify_cloud(sensor_msgs::PointCloud2 msg)
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr z_maxima(new pcl::PointCloud<pcl::PointXYZRGB>);
     pcl::fromROSMsg(msg, *cloud);
 
-    //get maxima in z
-    double scaling = 20; // 1 cm = 100
-    tf::Vector3 shift(2.5,-1,0);
-
+    //! get maxima in z by iterating over all points and updating the bin the points fall into
+    //! we are looking at a 1mx1m area of hopefully table, the scaling defines the resolution
+    //! and the shift defines where we are looking at, so far its always aligned with the msg
+    //! coordinate frame, so moving around could also be done by transforming the msg to
+    //! another coord frame.
+    double scaling = 20; // 1 cm resolution => scaling 100  10cm => scaling 10
+    tf::Vector3 shift(2.5,-1,0); // shift the data
     for (size_t i=0; i < cloud->points.size(); ++i)
     {
         tf::Vector3 act(cloud->points[i].x,cloud->points[i].y,cloud->points[i].z);
@@ -285,10 +317,13 @@ void classify_cloud(sensor_msgs::PointCloud2 msg)
         }
     }
 
+    // index set of points that are interesting for us later => for debugging
     boost::shared_ptr<std::vector<int> > indices( new std::vector<int> );
 
+    //! we look at points that lie within delta from the top point in the bin
+    //! this set is divided into points below 1/3 of delta and above 2/3 of delta
+    //! forming the top and bottom sets
     double delta = .04;
-
 
     for (size_t i=0; i < cloud->points.size(); ++i)
     {
@@ -330,7 +365,7 @@ void classify_cloud(sensor_msgs::PointCloud2 msg)
     parr.header.frame_id = msg.header.frame_id;
     parr.header.stamp = ros::Time(0);
 
-        visualization_msgs::MarkerArray marr;
+    visualization_msgs::MarkerArray marr;
 
 
     for (size_t y = 0; y < scaling; ++y)
@@ -338,10 +373,12 @@ void classify_cloud(sensor_msgs::PointCloud2 msg)
         for (size_t x = 0; x < scaling; ++x)
         {
             size_t addr = x + y * 100;
+            // for each bin, check if we have some points int the top and bottom set
             if ((field_topvec[addr].size() > 10) && (field_botvec[addr].size() > 10))
             {
                 tf::Vector3 top(0,0,0);
                 tf::Vector3 bot(0,0,0);
+                //! calculate means of the top and bottom points and take them to set the up direction / slope of the bowls etc.
                 for (std::vector<tf::Vector3>::iterator it = field_topvec[addr].begin(); it != field_topvec[addr].end(); ++it)
                     top += *it;
                 top /= field_topvec[addr].size();
@@ -355,7 +392,8 @@ void classify_cloud(sensor_msgs::PointCloud2 msg)
 
                 std::vector<tf::Vector3> evec;
                 std::vector<double> eval;
-                pos_eigen(field_topvec[addr], evec, eval);
+                //! calculate a pca of the top point set and take that as the "right" axis of the grasp
+                pos_eigen_xy(field_topvec[addr], evec, eval);
 
                 tf::Vector3 z_axis = evec[0].normalize();
                 tf::Vector3 x_axis = top - bot; // tf::Vector3(0,0,1);
@@ -422,14 +460,15 @@ void classify_cloud(sensor_msgs::PointCloud2 msg)
 // get the low objects that aren't much higher than the table
 void classify_cloud_low(sensor_msgs::PointCloud2 msg)
 {
-    ROS_INFO("classify");
+    ROS_INFO("classify_low");
     float field[100 * 100]; // we start with 1x1m 1cm resolution
     float field_low[100 * 100]; // we start with 1x1m 1cm resolution
     float field_avg[100 * 100]; // we start with 1x1m 1cm resolution
     float field_sigma[100 * 100]; // we start with 1x1m 1cm resolution
     float field_num[100 * 100]; // we start with 1x1m 1cm resolution
-    std::vector<tf::Vector3> field_topvec[100 * 100];
-    std::vector<tf::Vector3> field_botvec[100 * 100];
+    std::vector<int> field_topvec[100 * 100];
+    std::vector<int> field_botvec[100 * 100];
+    std::vector<int> field_idx[100 * 100]; // idices on tops cloud showing which points lie in which bin
 
     tf::Vector3 shift(2.5,-1,0);
 
@@ -447,8 +486,9 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
     pcl::fromROSMsg(msg, *cloud);
 
     //get maxima in z
-    double scaling = 20; // 1 cm = 100
+    double scaling = 50; // 1 cm = 100
 
+    //! get the top points' z coord per bin
     for (size_t i=0; i < cloud->points.size(); ++i)
     {
         tf::Vector3 act(cloud->points[i].x,cloud->points[i].y,cloud->points[i].z);
@@ -467,6 +507,9 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
 
     boost::shared_ptr<std::vector<int> > top_indices( new std::vector<int> );
 
+    double thickness = 0.04;
+
+    //extract points within thickness cm of top point to get rid of thing underneath table etc
     for (size_t i=0; i < cloud->points.size(); ++i)
     {
         tf::Vector3 act(cloud->points[i].x,cloud->points[i].y,cloud->points[i].z);
@@ -479,20 +522,19 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
             //if (field[addr] - field_low[addr] < 0.1)
             //if (act.z() > 0.8)
             //if (act.z() < 0.88)
-            if (act.z() - field[addr] > -.02)
+            if (act.z() - field[addr] > -thickness)
             {
                 top_indices->push_back(i);
             }
         }
     }
 
-    // GET RID OF POINTS LOWER THAN 2 cms below top
+    //! GET RID OF POINTS LOWER THAN thickness cms below top
 
     pcl::ExtractIndices<pcl::PointXYZRGB> ei2;
     ei2.setInputCloud(cloud);
     ei2.setIndices(top_indices);
     ei2.filter(*tops);
-
 
     for (size_t i = 0; i < 100*100; ++i)
     {
@@ -602,7 +644,72 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
             int xcoord = act.x() * scaling;
             int ycoord = act.y() * scaling;
             size_t addr = xcoord + ycoord * 100;
+
+            field_idx[addr].push_back(i);
+        }
+    }
+
+    double min_c = 10000;
+    double max_c = -10000;
+    int t = 0;
+    for (t = 0; t <= 1; t++)
+    for (size_t y = 0; y < scaling; ++y)
+    {
+        for (size_t x = 0; x < scaling; ++x)
+        {
+            size_t addr = x + y * 100;
+            if ((field_idx[addr].size() > 10))
+            {
+                int id0 = field_idx[addr][0];
+                tf::Vector3 pt(tops->points[id0].x,tops->points[id0].y,tops->points[id0].z);
+                std::vector<tf::Vector3> evec;
+                std::vector<double> eval;
+                //if ((pt - tf::Vector3(-1.63,1.33,.86)).length() < 0.05)
+                {
+                    //std::cout << field_idx[addr].size() << " " << pt.x() << " " << pt.y() << endl;
+                    pos_eigen_zcol(field_idx[addr], tops, evec, eval, false); //((pt - tf::Vector3(-1.63,1.33,.86)).length() < 0.05));
+
+                    tf::Vector3 mean(0,0,0);
+                    for (std::vector<int>::iterator it = field_idx[addr].begin(); it != field_idx[addr].end(); it ++)
+                        mean += pcl_to_zcol(tops->points[*it]);
+
+                    mean = mean / field_idx[addr].size();
+
+                    if ((fabs(evec[0].x()) > 0.0000001) && (fabs(evec[0].y()) > 0.0000001))
+                    for (std::vector<int>::iterator it = field_idx[addr].begin(); it != field_idx[addr].end(); it ++)
+                    {
+                        // project vector on main axis
+                        tf::Vector3 cur = pcl_to_zcol(tops->points[*it]) - mean;
+                        if (max_c == min_c)
+                            max_c += 0.00001;
+                        double col = cur.dot(evec[0]);
+                        if (t == 0) {
+                        if (col > max_c)
+                            max_c = col;
+                        if (col < min_c)
+                            min_c = col;
+                        }
+                        col = (col - min_c) / (max_c - min_c) * 255;
+                        tops->points[*it].r = col;
+                        tops->points[*it].g = -col;
+                        tops->points[*it].b = 0;
+                    }
+                }
+                    //projected.push_back(pcl_to_zcol(cloud->points[*it]));
+
+                // do some statistics on the points in this bin
+
+                // find the covariance in height + color and use it to find the principle axis
+
+            }
+        }
+    }
+
+    std::cout << "col limits " << min_c << " " << max_c << std::endl;
+
+
             //if (fabs(field[xcoord + ycoord * 100] - act.z()) < 0.0000000001)
+            /*
             double dist_to_max = fabs(field[addr] - act.z());
             double dist_to_min = fabs(field_low[addr] - act.z());
             double dist_to_avg = act.z() - field_avg[addr];
@@ -621,19 +728,18 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
 
             indices->push_back(i);
             //    std::cout << "si " << field_sigma[addr];
-
+            */
 
             //if (act.z() > field_avg[addr] + 2 * field_sigma[addr])
 
-
-            if (fabs(act_.x() + 1.63) < 0.02)
+            /*if (fabs(act_.x() + 1.63) < 0.02)
                 if (fabs(act_.y() - 1.5) < 0.02)
                 {
                     std::cout << "field_sigma " << field_sigma[addr] << std::endl;
                     std::cout << "field_avg" << field_avg[addr] << std::endl;
                     std::cout << "field_low " << field_low[addr] << std::endl;
                     std::cout << "field" << field[addr] << std::endl;
-                }
+                }*/
 
             //tops->points[i].r = ((field_sigma[addr] - sigma_min) / (sigma_max - sigma_min)) * 255;
             //tops->points[i].g = tops->points[i].r ;
@@ -660,8 +766,8 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
                 //field_botvec[i] += act_;
                 //field_botvec_n[i] += 1;
             }*/
-        }
-    }
+        //}
+    //}
 
     std::cout << " sigma max " << sigma_max  << " sigma min " << sigma_min << std::endl;
 
@@ -672,7 +778,7 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
     parr.header.stamp = ros::Time(0);
 
     visualization_msgs::MarkerArray marr;
-
+    /*
     for (size_t y = 0; y < scaling; ++y)
     {
         for (size_t x = 0; x < scaling; ++x)
@@ -752,19 +858,21 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
             }
         }
     }
+    */
 
     marker_pub_arr.publish(marr);
 
 
     parr_flat_pub.publish(parr);
 
-    pcl::ExtractIndices<pcl::PointXYZRGB> ei;
-    ei.setInputCloud(tops);
-    ei.setIndices(indices);
-    ei.filter(*z_maxima);
+    //pcl::ExtractIndices<pcl::PointXYZRGB> ei;
+    //ei.setInputCloud(tops);
+    //ei.setIndices(indices);
+    //ei.filter(*z_maxima);
 
     sensor_msgs::PointCloud2 z_max_msg;
-    pcl::toROSMsg(*z_maxima, z_max_msg);
+    //pcl::toROSMsg(*z_maxima, z_max_msg);
+    pcl::toROSMsg(*tops, z_max_msg);
     z_max_msg.header = msg.header;
     pct_pub.publish(z_max_msg);
 
@@ -835,8 +943,32 @@ int main(int argc, char **argv)
         bag.open(argv[2], rosbag::bagmode::Write);
         bag.write("cloud", ros::Time::now(), msg);
         bag.close();
-
     }
+
+
+    if (atoi(argv[1]) == 4)
+    {
+        rosbag::Bag bag;
+        bag.open(argv[2], rosbag::bagmode::Read);
+        rosbag::View view(bag);
+
+        BOOST_FOREACH(rosbag::MessageInstance const m, view)
+        {
+            std::string topicname = m.getTopic();
+            //ROS_INFO("topic of msg: |%s|", topicname.c_str());
+            sensor_msgs::PointCloud2::ConstPtr msg = m.instantiate<sensor_msgs::PointCloud2>();
+            if (msg != NULL)
+            {
+                sensor_msgs::PointCloud2 out_msg = *msg;
+                ROS_INFO("GOT THE CLOUD FROM THE BAG");
+                out_msg.header.stamp = ros::Time::now();
+                pct_pub.publish(out_msg);
+                classify_cloud_low(out_msg);
+            }
+
+        }
+    }
+
 
     ROS_INFO("DONE");
 
