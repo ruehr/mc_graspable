@@ -69,7 +69,7 @@ void getCloud(sensor_msgs::PointCloud2 &cloud_msg, std::string frame_id, ros::Ti
 int marker_ids_ = 0;
 
 // add a "gripper" marker
-void addMarker(visualization_msgs::MarkerArray &marr, tf::Pose pose, double x = 0.05, double y= 0.05, double z= 0.05)
+void addMarker(visualization_msgs::MarkerArray &marr, tf::Pose pose, double x = 0.05, double y= 0.05, double z= 0.05, bool gripper = true)
 {
     visualization_msgs::Marker marker;
     marker.header.frame_id = "map";
@@ -85,6 +85,7 @@ void addMarker(visualization_msgs::MarkerArray &marr, tf::Pose pose, double x = 
     marker.pose.orientation.y = pose.getRotation().y();
     marker.pose.orientation.z = pose.getRotation().z();
     marker.pose.orientation.w = pose.getRotation().w();
+    marker.lifetime = ros::Duration(10);
     marker.scale.x = 0.01;
     marker.scale.y = 0.01;
     marker.scale.z = z;
@@ -125,6 +126,9 @@ void addMarker(visualization_msgs::MarkerArray &marr, tf::Pose pose, double x = 
     marker.color.g = 0.50;
     marker.color.b = 0.90;
     marker.color.a = 1;
+
+    if (!gripper)
+      return;
 
     marker.type = visualization_msgs::Marker::CUBE;
 
@@ -180,7 +184,14 @@ void calculateSampleCovariance(const MatrixBase<Derived>& x, const MatrixBase<De
 
 }
 
-MatrixXd pos_covar_xy(std::vector<tf::Vector3> points)
+// z plus red/blue axis
+tf::Vector3 pcl_to_tf(pcl::PointXYZRGB pt)
+{
+    return tf::Vector3(pt.x, pt.y,  pt.z);
+    //return tf::Vector3(pt.z, 0, 0);
+}
+
+MatrixXd pos_covar_xy(const std::vector<tf::Vector3> &points)
 {
     MatrixXd esamples(points.size(),3);
     for (size_t n=0; n < points.size(); ++n)
@@ -197,7 +208,7 @@ MatrixXd pos_covar_xy(std::vector<tf::Vector3> points)
     return ret;
 }
 
-void pos_eigen_xy(std::vector<tf::Vector3> points, std::vector<tf::Vector3> &evec, std::vector<double> &eval)
+void pos_eigen_xy(const std::vector<tf::Vector3> &points, std::vector<tf::Vector3> &evec, std::vector<double> &eval)
 {
     Matrix<double,3,3> covarMat = pos_covar_xy(points);
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double,3,3> >
@@ -363,7 +374,7 @@ void classify_cloud(sensor_msgs::PointCloud2 msg)
 
     geometry_msgs::PoseArray parr;
     parr.header.frame_id = msg.header.frame_id;
-    parr.header.stamp = ros::Time(0);
+    parr.header.stamp = ros::Time::now();
 
     visualization_msgs::MarkerArray marr;
 
@@ -469,6 +480,7 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
     std::vector<int> field_topvec[100 * 100];
     std::vector<int> field_botvec[100 * 100];
     std::vector<int> field_idx[100 * 100]; // idices on tops cloud showing which points lie in which bin
+    std::vector<int> field_idx_class[100 * 100]; // idices on tops cloud showing which points lie in which bin
 
     tf::Vector3 shift(2.5,-1,0);
 
@@ -696,6 +708,7 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
                             tops->points[*it].r = 255;
                             tops->points[*it].g = 0;
                             tops->points[*it].b = 0;
+                            field_idx_class[addr].push_back(*it);
                         }
                     }
                 }
@@ -709,7 +722,74 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
         }
     }
 
+    visualization_msgs::MarkerArray marr;
+
+    geometry_msgs::PoseArray parr;
+    parr.header.frame_id = msg.header.frame_id;
+    parr.header.stamp = ros::Time::now();
+
+    for (size_t y = 0; y < scaling; ++y)
+    {
+        for (size_t x = 0; x < scaling; ++x)
+        {
+            size_t addr = x + y * 100;
+            if ((field_idx_class[addr].size() > 10))
+            {
+                std::vector<tf::Vector3> pts;
+                tf::Vector3 mean(0,0,0);
+                for (std::vector<int>::iterator it = field_idx_class[addr].begin(); it != field_idx_class[addr].end(); it ++)
+                {
+                    tf::Vector3 act = pcl_to_tf(tops->points[*it]);
+                    pts.push_back(act);
+                    mean += act;
+                }
+                mean = mean / field_idx_class[addr].size();
+
+                // GET RID OF THIS HACK !
+                if (mean.z() < 0.86)
+                 continue;
+
+                std::vector<tf::Vector3> evec;
+                std::vector<double> eval;
+                //! calculate a pca of the top point set and take that as the "right" axis of the grasp
+                pos_eigen_xy(pts, evec, eval);
+
+                tf::Vector3 z_axis = evec[0].normalize();
+                tf::Vector3 x_axis = tf::Vector3(0,0,1);
+                tf::Vector3 y_axis = (x_axis.cross(z_axis)).normalize();
+                x_axis = (z_axis.cross(y_axis)).normalize();
+
+                y_axis = (x_axis.cross(z_axis)).normalize();
+                x_axis = (y_axis.cross(z_axis)).normalize();
+
+                btMatrix3x3 rot(x_axis.x(), y_axis.x(), z_axis.x(),
+                                x_axis.y(), y_axis.y(), z_axis.y(),
+                                x_axis.z(), y_axis.z(), z_axis.z());
+                btQuaternion rot_quat;
+                rot.getRotation(rot_quat);
+
+                tf::Pose pose;
+                pose.setOrigin(mean);
+                pose.setRotation(rot_quat);
+                geometry_msgs::Pose pose_msg;
+                tf::poseTFToMsg(pose,pose_msg);
+                parr.poses.push_back(pose_msg);
+                //std::cout << "bin/ias_drawer_executive -3 0 " << pose_msg.position.x << " " << pose_msg.position.y << " " << pose_msg.position.z + .1 << " "
+                  //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl;
+                //std::cout << "bin/ias_drawer_executive -3 0 " << pose_msg.position.x << " " << pose_msg.position.y << " " << pose_msg.position.z << " "
+                  //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl << std::endl;
+
+                addMarker(marr, pose, 0.05, 0.05, 0.05, true);
+
+
+            }
+        }
+    }
+
+
     std::cout << "col limits " << min_c << " " << max_c << std::endl;
+
+    marker_pub_arr.publish(marr);
 
 
             //if (fabs(field[xcoord + ycoord * 100] - act.z()) < 0.0000000001)
@@ -777,11 +857,9 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
 
     std::cout << std::endl;
 
-    geometry_msgs::PoseArray parr;
-    parr.header.frame_id = msg.header.frame_id;
-    parr.header.stamp = ros::Time(0);
 
-    visualization_msgs::MarkerArray marr;
+
+    //visualization_msgs::MarkerArray marr;
     /*
     for (size_t y = 0; y < scaling; ++y)
     {
@@ -864,7 +942,7 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
     }
     */
 
-    marker_pub_arr.publish(marr);
+    //marker_pub_arr.publish(marr);
 
 
     parr_flat_pub.publish(parr);
@@ -894,7 +972,7 @@ int main(int argc, char **argv)
     listener_ = new tf::TransformListener();
 
     pct_pub =  nh.advertise<sensor_msgs::PointCloud2>( "/debug_cloud", 10 , true);
-    parr_pub = nh.advertise<geometry_msgs::PoseArray>( "/grasp_poses", 10 , true);
+    parr_pub = nh.advertise<geometry_msgs::PoseArray>( "/grasp_poses", 10, true);
     parr_flat_pub = nh.advertise<geometry_msgs::PoseArray>( "/flat_grasp_poses", 10 , true);
     marker_pub = nh.advertise<visualization_msgs::Marker>( "/grasp_marker", 10 , true);
     marker_pub_arr = nh.advertise<visualization_msgs::MarkerArray>( "/grasp_marker_array", 10 , true);
@@ -973,13 +1051,38 @@ int main(int argc, char **argv)
         }
     }
 
+    if (atoi(argv[1]) == 5)
+    {
+        //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+        ros::Time time_stamp;
+        //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
+        sensor_msgs::PointCloud2 msg;
+        getCloud(msg, "/map", ros::Time(0), &time_stamp);
+        classify_cloud_low(msg);
+    }
+
 
     ROS_INFO("DONE");
 
+    ros::Time lastTime = ros::Time::now();
+
     while (nh.ok())
     {
-
-        rt.sleep();
+        geometry_msgs::PoseArray pa;
+        bool got = false;
+        while (!got) {
+            pa  = *(ros::topic::waitForMessage<geometry_msgs::PoseArray>("/go"));
+            if (pa.header.stamp != lastTime)
+                got = true;
+        }
+        lastTime = pa.header.stamp;
+        ROS_INFO("GOT A REQUEST");
+        std::cout << pa << std::endl;
+        sensor_msgs::PointCloud2 msg;
+        ros::Time time_stamp;
+        getCloud(msg, "/map", ros::Time(0), &time_stamp);
+        classify_cloud(msg);
+        classify_cloud_low(msg);
     }
 
 }
