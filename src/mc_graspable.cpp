@@ -32,6 +32,8 @@ ros::Publisher parr_flat_pub;
 ros::Publisher marker_pub;
 ros::Publisher marker_pub_arr;
 
+std::string topic_name = "/kinect/cloud_throttled";
+
 void getCloud(sensor_msgs::PointCloud2 &cloud_msg, std::string frame_id, ros::Time after, ros::Time *tm)
 {
 
@@ -41,7 +43,7 @@ void getCloud(sensor_msgs::PointCloud2 &cloud_msg, std::string frame_id, ros::Ti
     {
         //pc  = *(ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/kinect/cloud_throttled"));
         ROS_INFO("BEFORE");
-        pc  = *(ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/kinect/cloud_throttled"));
+        pc  = *(ros::topic::waitForMessage<sensor_msgs::PointCloud2>(topic_name));
         ROS_INFO("AFTER");
         if ((after == ros::Time(0,0)) || (pc.header.stamp > after))
             found = true;
@@ -291,7 +293,7 @@ void pos_eigen_zcol(std::vector<int> &idx, pcl::PointCloud<pcl::PointXYZRGB>::Pt
 
 
 //! get top grasp points on rims of objects
-void classify_cloud(sensor_msgs::PointCloud2 msg)
+void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04)
 {
     ROS_INFO("classify");
     float field[100 * 100]; // we start with 1x1m 1cm resolution
@@ -334,7 +336,6 @@ void classify_cloud(sensor_msgs::PointCloud2 msg)
     //! we look at points that lie within delta from the top point in the bin
     //! this set is divided into points below 1/3 of delta and above 2/3 of delta
     //! forming the top and bottom sets
-    double delta = .04;
 
     for (size_t i=0; i < cloud->points.size(); ++i)
     {
@@ -469,7 +470,7 @@ void classify_cloud(sensor_msgs::PointCloud2 msg)
 
 
 // get the low objects that aren't much higher than the table
-void classify_cloud_low(sensor_msgs::PointCloud2 msg)
+void classify_cloud_low(sensor_msgs::PointCloud2 msg, double thickness = 0.04)
 {
     ROS_INFO("classify_low");
     float field[100 * 100]; // we start with 1x1m 1cm resolution
@@ -518,8 +519,6 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
     }
 
     boost::shared_ptr<std::vector<int> > top_indices( new std::vector<int> );
-
-    double thickness = 0.04;
 
     //extract points within thickness cm of top point to get rid of thing underneath table etc
     for (size_t i=0; i < cloud->points.size(); ++i)
@@ -961,7 +960,6 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg)
 }
 
 
-
 int main(int argc, char **argv)
 {
 
@@ -1053,6 +1051,7 @@ int main(int argc, char **argv)
 
     if (atoi(argv[1]) == 5)
     {
+        topic_name = "/camera/rgb/points";
         //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
         ros::Time time_stamp;
         //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
@@ -1061,10 +1060,24 @@ int main(int argc, char **argv)
         classify_cloud_low(msg);
     }
 
+    if (atoi(argv[1]) == 6)
+    {
+        topic_name = "/camera/rgb/points";
+        //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+        ros::Time time_stamp;
+        //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
+        sensor_msgs::PointCloud2 msg;
+        getCloud(msg, "/map", ros::Time(0), &time_stamp);
+        classify_cloud(msg, atof(argv[2]));
+    }
+
+
 
     ROS_INFO("DONE");
 
     ros::Time lastTime = ros::Time::now();
+
+    topic_name = "/camera/rgb/points";
 
     while (nh.ok())
     {
@@ -1081,7 +1094,7 @@ int main(int argc, char **argv)
         sensor_msgs::PointCloud2 msg;
         ros::Time time_stamp;
         getCloud(msg, "/map", ros::Time(0), &time_stamp);
-        classify_cloud(msg);
+        classify_cloud(msg,0.01);
         classify_cloud_low(msg);
     }
 
