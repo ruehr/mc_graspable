@@ -87,7 +87,8 @@ void addMarker(visualization_msgs::MarkerArray &marr, tf::Pose pose, double x = 
     marker.pose.orientation.y = pose.getRotation().y();
     marker.pose.orientation.z = pose.getRotation().z();
     marker.pose.orientation.w = pose.getRotation().w();
-    marker.lifetime = ros::Duration(10);
+
+    marker.lifetime = ros::Duration(60);
     marker.scale.x = 0.01;
     marker.scale.y = 0.01;
     marker.scale.z = z;
@@ -293,7 +294,7 @@ void pos_eigen_zcol(std::vector<int> &idx, pcl::PointCloud<pcl::PointXYZRGB>::Pt
 
 
 //! get top grasp points on rims of objects
-void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04)
+void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double scaling = 20, double pitch_limit = 100)
 {
     ROS_INFO("classify");
     float field[100 * 100]; // we start with 1x1m 1cm resolution
@@ -315,7 +316,7 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04)
     //! and the shift defines where we are looking at, so far its always aligned with the msg
     //! coordinate frame, so moving around could also be done by transforming the msg to
     //! another coord frame.
-    double scaling = 20; // 1 cm resolution => scaling 100  10cm => scaling 10
+    //double scaling = 20; // 1 cm resolution => scaling 100  10cm => scaling 10
     tf::Vector3 shift(2.5,-1,0); // shift the data
     for (size_t i=0; i < cloud->points.size(); ++i)
     {
@@ -386,7 +387,8 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04)
         {
             size_t addr = x + y * 100;
             // for each bin, check if we have some points int the top and bottom set
-            if ((field_topvec[addr].size() > 10) && (field_botvec[addr].size() > 10))
+            //if ((field_topvec[addr].size() >10) && (field_botvec[addr].size() > 10))
+            if ((field_topvec[addr].size() >1) && (field_botvec[addr].size() > 1))
             {
                 tf::Vector3 top(0,0,0);
                 tf::Vector3 bot(0,0,0);
@@ -399,8 +401,8 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04)
                 bot /= field_botvec[addr].size();
 
                 //!todo, this is depending on the table height!
-                if (top.z() < 0.9)
-                    continue;
+                //if (top.z() < 0.9)
+                  //  continue;
 
                 std::vector<tf::Vector3> evec;
                 std::vector<double> eval;
@@ -428,6 +430,14 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04)
                                 x_axis.z(), y_axis.z(), z_axis.z());
                 btQuaternion rot_quat;
                 rot.getRotation(rot_quat);
+
+                //rot.void 	getEulerZYX (btScalar &yaw, btScalar &pitch, btScalar &roll, unsigned int solution_number=1) const
+                double yaw,pitch,roll;
+                rot.getEulerZYX(yaw,pitch,roll);
+                std::cout << "YPR " << yaw << " " << pitch << " " << roll << std::endl;
+
+                if (pitch < pitch_limit)
+                    continue;
 
                 tf::Pose pose;
                 pose.setOrigin((bot + top) / 2);
@@ -463,7 +473,7 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04)
     sensor_msgs::PointCloud2 z_max_msg;
     pcl::toROSMsg(*z_maxima, z_max_msg);
     z_max_msg.header = msg.header;
-    //pct_pub.publish(z_max_msg);
+    pct_pub.publish(z_max_msg);
 
 }
 
@@ -1006,7 +1016,7 @@ int main(int argc, char **argv)
                 ROS_INFO("GOT THE CLOUD FROM THE BAG");
                 out_msg.header.stamp = ros::Time::now();
                 pct_pub.publish(out_msg);
-                classify_cloud(out_msg);
+                classify_cloud(out_msg, atof(argv[3]), atof(argv[4]), atof(argv[5]));
             }
 
         }
