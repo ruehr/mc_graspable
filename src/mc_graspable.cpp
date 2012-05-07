@@ -88,7 +88,7 @@ void addMarker(visualization_msgs::MarkerArray &marr, tf::Pose pose, double x = 
     marker.pose.orientation.z = pose.getRotation().z();
     marker.pose.orientation.w = pose.getRotation().w();
 
-    marker.lifetime = ros::Duration(60);
+    marker.lifetime = ros::Duration(10);
     marker.scale.x = 0.01;
     marker.scale.y = 0.01;
     marker.scale.z = z;
@@ -300,6 +300,7 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double sc
     float field[100 * 100]; // we start with 1x1m 1cm resolution
     std::vector<tf::Vector3> field_topvec[100 * 100];
     std::vector<tf::Vector3> field_botvec[100 * 100];
+    std::vector<tf::Vector3> field_vec[100 * 100];
 
     // field of maximum z values in an x/y bin
     for (size_t i = 0; i < 100*100; ++i)
@@ -350,6 +351,13 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double sc
             //if (fabs(field[xcoord + ycoord * 100] - act.z()) < 0.0000000001)
             double dist_to_max = fabs(field[xcoord + ycoord * 100] - act.z());
             float fac =  dist_to_max / .02;
+
+            if (dist_to_max < delta * 4)
+            {
+                field_vec[addr].push_back(act_);
+            }
+
+
             if (dist_to_max < delta / 3)
             {
                 indices->push_back(i);
@@ -388,10 +396,22 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double sc
             size_t addr = x + y * 100;
             // for each bin, check if we have some points int the top and bottom set
             //if ((field_topvec[addr].size() >10) && (field_botvec[addr].size() > 10))
-            if ((field_topvec[addr].size() >1) && (field_botvec[addr].size() > 1))
+            if ((field_topvec[addr].size() >10) && (field_botvec[addr].size() > 10))
             {
                 tf::Vector3 top(0,0,0);
                 tf::Vector3 bot(0,0,0);
+
+                double minz = 10000;
+                double maxz = -10000;
+                for (std::vector<tf::Vector3>::iterator it = field_vec[addr].begin(); it != field_vec[addr].end(); it ++)
+                {
+                    tf::Vector3 act = *it;
+                    if (act.z() > maxz)
+                        maxz = act.z();
+                    if (act.z() < minz)
+                        minz = act.z();
+                }
+
                 //! calculate means of the top and bottom points and take them to set the up direction / slope of the bowls etc.
                 for (std::vector<tf::Vector3>::iterator it = field_topvec[addr].begin(); it != field_topvec[addr].end(); ++it)
                     top += *it;
@@ -403,6 +423,10 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double sc
                 //!todo, this is depending on the table height!
                 //if (top.z() < 0.9)
                   //  continue;
+
+                // only go for highish objects
+                if ((bot.z() + top.z()) / 2  < minz + 0.02)
+                   continue;
 
                 std::vector<tf::Vector3> evec;
                 std::vector<double> eval;
@@ -523,8 +547,23 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg, double thickness = 0.04)
             size_t addr = xcoord + ycoord * 100;
             if (field[addr] < act.z())
                 field[addr] = act.z();
-            //if (field_low[addr] > act.z())
-            //    field_low[addr] = act.z();
+            if (field_low[addr] > act.z())
+                field_low[addr] = act.z();
+        }
+    }
+
+    // get low points
+    for (size_t i=0; i < cloud->points.size(); ++i)
+    {
+        tf::Vector3 act(cloud->points[i].x,cloud->points[i].y,cloud->points[i].z);
+        act = act + shift;
+        if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
+        {
+            int xcoord = act.x() * scaling;
+            int ycoord = act.y() * scaling;
+            size_t addr = xcoord + ycoord * 100;
+            if ((field_low[addr] > act.z()) && (act.z() > field[addr] - .1))
+                field_low[addr] = act.z();
         }
     }
 
@@ -746,17 +785,30 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg, double thickness = 0.04)
             {
                 std::vector<tf::Vector3> pts;
                 tf::Vector3 mean(0,0,0);
+                double minz = 10000;
+                double maxz = -10000;
                 for (std::vector<int>::iterator it = field_idx_class[addr].begin(); it != field_idx_class[addr].end(); it ++)
                 {
                     tf::Vector3 act = pcl_to_tf(tops->points[*it]);
                     pts.push_back(act);
                     mean += act;
+                    if (act.z() > maxz)
+                        maxz = act.z();
+                    if (act.z() < minz)
+                        minz = act.z();
                 }
                 mean = mean / field_idx_class[addr].size();
 
                 // GET RID OF THIS HACK !
-                if (mean.z() < 0.86)
-                 continue;
+                //if (mean.z() < 0.86)
+                 //continue;
+
+                //only go for flat flat items!
+                if (field[addr] - field_low[addr] > 0.025)
+                    continue;
+                //if (maxz - minz > 0.02)
+                  //  continue;
+
 
                 std::vector<tf::Vector3> evec;
                 std::vector<double> eval;
@@ -989,14 +1041,17 @@ int main(int argc, char **argv)
 
     ros::Rate rt(30);
 
+    // for plates and bowls:
+    //bin/mc_graspable 1 0.02 20 0.4
     if (atoi(argv[1]) == 1)
     {
         //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
         ros::Time time_stamp;
         //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
-        sensor_msgs::PointCloud2 msg;
-        getCloud(msg, "/map", ros::Time(0), &time_stamp);
-        classify_cloud(msg);
+        sensor_msgs::PointCloud2 out_msg;
+        getCloud(out_msg, "/map", ros::Time(0), &time_stamp);
+        //classify_cloud(msg);
+        classify_cloud(out_msg, atof(argv[2]), atof(argv[3]), atof(argv[4]));
     }
 
     if (atoi(argv[1]) == 2)
@@ -1104,7 +1159,8 @@ int main(int argc, char **argv)
         sensor_msgs::PointCloud2 msg;
         ros::Time time_stamp;
         getCloud(msg, "/map", ros::Time(0), &time_stamp);
-        classify_cloud(msg,0.01);
+        //classify_cloud(msg,0.01);
+        classify_cloud(msg,0.02,20,0.4);
         classify_cloud_low(msg);
     }
 
