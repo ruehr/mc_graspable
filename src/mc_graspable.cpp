@@ -23,6 +23,14 @@
 
 #include <Eigen/Dense>
 
+#include <ros/ros.h>
+#include <actionlib/server/simple_action_server.h>
+#include <mc_graspable/FindGraspablesAction.h>
+
+
+
+
+
 using namespace std;
 
 tf::TransformListener *listener_ = 0;
@@ -131,7 +139,7 @@ void addMarker(visualization_msgs::MarkerArray &marr, tf::Pose pose, double x = 
     marker.color.a = 1;
 
     if (!gripper)
-      return;
+        return;
 
     marker.type = visualization_msgs::Marker::CUBE;
 
@@ -247,10 +255,11 @@ void pos_eigen_zcol(std::vector<int> &idx, pcl::PointCloud<pcl::PointXYZRGB>::Pt
     MatrixXf::Index  maxIndex;
     eigenSolver.eigenvalues().maxCoeff(&maxIndex);
     MatrixXd max = eigenSolver.eigenvectors().col(maxIndex);
-    if (print) {
-      cout << "vec" << endl << eigenSolver.eigenvectors() << endl;
-      cout << "val" << endl << eigenSolver.eigenvalues() << endl;
-      cout << "max " << endl << max << endl;
+    if (print)
+    {
+        cout << "vec" << endl << eigenSolver.eigenvectors() << endl;
+        cout << "val" << endl << eigenSolver.eigenvalues() << endl;
+        cout << "max " << endl << max << endl;
     }
     tf::Vector3 maxVec(max(0),max(1),max(2));
     evec.push_back(maxVec);
@@ -294,9 +303,11 @@ void pos_eigen_zcol(std::vector<int> &idx, pcl::PointCloud<pcl::PointXYZRGB>::Pt
 
 
 //! get top grasp points on rims of objects
-void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double scaling = 20, double pitch_limit = 100)
+geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double scaling = 20, double pitch_limit = 100, tf::Vector3 min = tf::Vector3(0,0,0), tf::Vector3 max = tf::Vector3(1,1,2))
 {
     ROS_INFO("classify");
+
+    int y_mult = (max.y - min.x) * 100 / scaling;
     float field[100 * 100]; // we start with 1x1m 1cm resolution
     std::vector<tf::Vector3> field_topvec[100 * 100];
     std::vector<tf::Vector3> field_botvec[100 * 100];
@@ -422,11 +433,11 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double sc
 
                 //!todo, this is depending on the table height!
                 //if (top.z() < 0.9)
-                  //  continue;
+                //  continue;
 
                 // only go for highish objects
                 if ((bot.z() + top.z()) / 2  < minz + 0.02)
-                   continue;
+                    continue;
 
                 std::vector<tf::Vector3> evec;
                 std::vector<double> eval;
@@ -470,9 +481,9 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double sc
                 tf::poseTFToMsg(pose,pose_msg);
                 parr.poses.push_back(pose_msg);
                 //std::cout << "bin/ias_drawer_executive -3 0 " << pose_msg.position.x << " " << pose_msg.position.y << " " << pose_msg.position.z + .1 << " "
-                  //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl;
+                //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl;
                 //std::cout << "bin/ias_drawer_executive -3 0 " << pose_msg.position.x << " " << pose_msg.position.y << " " << pose_msg.position.z << " "
-                  //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl << std::endl;
+                //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl << std::endl;
 
                 addMarker(marr, pose);
                 //pose.setOrigin(bot + tf::Vector3(0.005,0.005,0));
@@ -486,7 +497,6 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double sc
 
     marker_pub_arr.publish(marr);
 
-
     parr_pub.publish(parr);
 
     pcl::ExtractIndices<pcl::PointXYZRGB> ei;
@@ -499,12 +509,14 @@ void classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double sc
     z_max_msg.header = msg.header;
     pct_pub.publish(z_max_msg);
 
+    return parr;
+
 }
 
 
 
 // get the low objects that aren't much higher than the table
-void classify_cloud_low(sensor_msgs::PointCloud2 msg, double thickness = 0.04)
+geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double thickness = 0.04, tf::Vector3 min = tf::Vector3(0,0,0), tf::Vector3 max = tf::Vector3(1,1,2))
 {
     ROS_INFO("classify_low");
     float field[100 * 100]; // we start with 1x1m 1cm resolution
@@ -713,62 +725,64 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg, double thickness = 0.04)
     double max_c = -10000;
     int t = 0;
     for (t = 0; t <= 1; t++)
-    for (size_t y = 0; y < scaling; ++y)
-    {
-        for (size_t x = 0; x < scaling; ++x)
+        for (size_t y = 0; y < scaling; ++y)
         {
-            size_t addr = x + y * 100;
-            if ((field_idx[addr].size() > 10))
+            for (size_t x = 0; x < scaling; ++x)
             {
-                int id0 = field_idx[addr][0];
-                tf::Vector3 pt(tops->points[id0].x,tops->points[id0].y,tops->points[id0].z);
-                std::vector<tf::Vector3> evec;
-                std::vector<double> eval;
-                //if ((pt - tf::Vector3(-1.63,1.33,.86)).length() < 0.05)
+                size_t addr = x + y * 100;
+                if ((field_idx[addr].size() > 10))
                 {
-                    //std::cout << field_idx[addr].size() << " " << pt.x() << " " << pt.y() << endl;
-                    pos_eigen_zcol(field_idx[addr], tops, evec, eval, false); //((pt - tf::Vector3(-1.63,1.33,.86)).length() < 0.05));
-                    //  evec.push_back(tf::Vector3(1,1,1));
-
-                    tf::Vector3 mean(0,0,0);
-                    for (std::vector<int>::iterator it = field_idx[addr].begin(); it != field_idx[addr].end(); it ++)
-                        mean += pcl_to_zcol(tops->points[*it]);
-
-                    mean = mean / field_idx[addr].size();
-
-                    //if ((fabs(evec[0].x()) > 0.0000001) && (fabs(evec[0].y()) > 0.0000001))
-                    for (std::vector<int>::iterator it = field_idx[addr].begin(); it != field_idx[addr].end(); it ++)
+                    int id0 = field_idx[addr][0];
+                    tf::Vector3 pt(tops->points[id0].x,tops->points[id0].y,tops->points[id0].z);
+                    std::vector<tf::Vector3> evec;
+                    std::vector<double> eval;
+                    //if ((pt - tf::Vector3(-1.63,1.33,.86)).length() < 0.05)
                     {
-                        // project vector on main axis
-                        tf::Vector3 cur = pcl_to_zcol(tops->points[*it]) - mean;
-                        if (max_c == min_c)
-                            max_c += 0.00001;
-                        double col = cur.dot(evec[0]);
-                        col = cur.length();
-                        if (t == 0) {
-                        if (col > max_c)
-                            max_c = col;
-                        if (col < min_c)
-                            min_c = col;
-                        }
-                        col = (col - min_c) / (max_c - min_c) * 255;
-                        if ((t ==1) && (col > 50)) {
-                            tops->points[*it].r = 255;
-                            tops->points[*it].g = 0;
-                            tops->points[*it].b = 0;
-                            field_idx_class[addr].push_back(*it);
+                        //std::cout << field_idx[addr].size() << " " << pt.x() << " " << pt.y() << endl;
+                        pos_eigen_zcol(field_idx[addr], tops, evec, eval, false); //((pt - tf::Vector3(-1.63,1.33,.86)).length() < 0.05));
+                        //  evec.push_back(tf::Vector3(1,1,1));
+
+                        tf::Vector3 mean(0,0,0);
+                        for (std::vector<int>::iterator it = field_idx[addr].begin(); it != field_idx[addr].end(); it ++)
+                            mean += pcl_to_zcol(tops->points[*it]);
+
+                        mean = mean / field_idx[addr].size();
+
+                        //if ((fabs(evec[0].x()) > 0.0000001) && (fabs(evec[0].y()) > 0.0000001))
+                        for (std::vector<int>::iterator it = field_idx[addr].begin(); it != field_idx[addr].end(); it ++)
+                        {
+                            // project vector on main axis
+                            tf::Vector3 cur = pcl_to_zcol(tops->points[*it]) - mean;
+                            if (max_c == min_c)
+                                max_c += 0.00001;
+                            double col = cur.dot(evec[0]);
+                            col = cur.length();
+                            if (t == 0)
+                            {
+                                if (col > max_c)
+                                    max_c = col;
+                                if (col < min_c)
+                                    min_c = col;
+                            }
+                            col = (col - min_c) / (max_c - min_c) * 255;
+                            if ((t ==1) && (col > 50))
+                            {
+                                tops->points[*it].r = 255;
+                                tops->points[*it].g = 0;
+                                tops->points[*it].b = 0;
+                                field_idx_class[addr].push_back(*it);
+                            }
                         }
                     }
-                }
                     //projected.push_back(pcl_to_zcol(cloud->points[*it]));
 
-                // do some statistics on the points in this bin
+                    // do some statistics on the points in this bin
 
-                // find the covariance in height + color and use it to find the principle axis
+                    // find the covariance in height + color and use it to find the principle axis
 
+                }
             }
         }
-    }
 
     visualization_msgs::MarkerArray marr;
 
@@ -801,13 +815,13 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg, double thickness = 0.04)
 
                 // GET RID OF THIS HACK !
                 //if (mean.z() < 0.86)
-                 //continue;
+                //continue;
 
                 //only go for flat flat items!
                 if (field[addr] - field_low[addr] > 0.025)
                     continue;
                 //if (maxz - minz > 0.02)
-                  //  continue;
+                //  continue;
 
 
                 std::vector<tf::Vector3> evec;
@@ -836,9 +850,9 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg, double thickness = 0.04)
                 tf::poseTFToMsg(pose,pose_msg);
                 parr.poses.push_back(pose_msg);
                 //std::cout << "bin/ias_drawer_executive -3 0 " << pose_msg.position.x << " " << pose_msg.position.y << " " << pose_msg.position.z + .1 << " "
-                  //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl;
+                //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl;
                 //std::cout << "bin/ias_drawer_executive -3 0 " << pose_msg.position.x << " " << pose_msg.position.y << " " << pose_msg.position.z << " "
-                  //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl << std::endl;
+                //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl << std::endl;
 
                 addMarker(marr, pose, 0.05, 0.05, 0.05, true);
 
@@ -853,65 +867,65 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg, double thickness = 0.04)
     marker_pub_arr.publish(marr);
 
 
-            //if (fabs(field[xcoord + ycoord * 100] - act.z()) < 0.0000000001)
-            /*
-            double dist_to_max = fabs(field[addr] - act.z());
-            double dist_to_min = fabs(field_low[addr] - act.z());
-            double dist_to_avg = act.z() - field_avg[addr];
-            float fac =  dist_to_max / .02;
-            //if (dist_to_max == 0)
-            //  indices->push_back(i);
-            //if (act.z() > field_avg[addr] + 0.01)
-            //if (field_sigma[addr] < 0.0025)
-            if (act.z() < field_avg[addr] + 0.003)
-            {
-                tops->points[i].z =  field_avg[addr];
-                tops->points[i].r = 255;
-                tops->points[i].g = 0;
-                tops->points[i].b = 0;
-            }
+    //if (fabs(field[xcoord + ycoord * 100] - act.z()) < 0.0000000001)
+    /*
+    double dist_to_max = fabs(field[addr] - act.z());
+    double dist_to_min = fabs(field_low[addr] - act.z());
+    double dist_to_avg = act.z() - field_avg[addr];
+    float fac =  dist_to_max / .02;
+    //if (dist_to_max == 0)
+    //  indices->push_back(i);
+    //if (act.z() > field_avg[addr] + 0.01)
+    //if (field_sigma[addr] < 0.0025)
+    if (act.z() < field_avg[addr] + 0.003)
+    {
+        tops->points[i].z =  field_avg[addr];
+        tops->points[i].r = 255;
+        tops->points[i].g = 0;
+        tops->points[i].b = 0;
+    }
 
-            indices->push_back(i);
-            //    std::cout << "si " << field_sigma[addr];
-            */
+    indices->push_back(i);
+    //    std::cout << "si " << field_sigma[addr];
+    */
 
-            //if (act.z() > field_avg[addr] + 2 * field_sigma[addr])
+    //if (act.z() > field_avg[addr] + 2 * field_sigma[addr])
 
-            /*if (fabs(act_.x() + 1.63) < 0.02)
-                if (fabs(act_.y() - 1.5) < 0.02)
-                {
-                    std::cout << "field_sigma " << field_sigma[addr] << std::endl;
-                    std::cout << "field_avg" << field_avg[addr] << std::endl;
-                    std::cout << "field_low " << field_low[addr] << std::endl;
-                    std::cout << "field" << field[addr] << std::endl;
-                }*/
+    /*if (fabs(act_.x() + 1.63) < 0.02)
+        if (fabs(act_.y() - 1.5) < 0.02)
+        {
+            std::cout << "field_sigma " << field_sigma[addr] << std::endl;
+            std::cout << "field_avg" << field_avg[addr] << std::endl;
+            std::cout << "field_low " << field_low[addr] << std::endl;
+            std::cout << "field" << field[addr] << std::endl;
+        }*/
 
-            //tops->points[i].r = ((field_sigma[addr] - sigma_min) / (sigma_max - sigma_min)) * 255;
-            //tops->points[i].g = tops->points[i].r ;
-            //tops->points[i].b = tops->points[i].r ;
+    //tops->points[i].r = ((field_sigma[addr] - sigma_min) / (sigma_max - sigma_min)) * 255;
+    //tops->points[i].g = tops->points[i].r ;
+    //tops->points[i].b = tops->points[i].r ;
 
-            /*if (dist_to_max < delta / 3)
-            {
-                indices->push_back(i);
-                cloud->points[i].r =  0;
-                cloud->points[i].g =  0;
-                cloud->points[i].b =  255;
-                field_topvec[addr].push_back(act_);
-                //field_topvec[i] += act_;
-                //field_topvec_n[i] += 1;
-            }
+    /*if (dist_to_max < delta / 3)
+    {
+        indices->push_back(i);
+        cloud->points[i].r =  0;
+        cloud->points[i].g =  0;
+        cloud->points[i].b =  255;
+        field_topvec[addr].push_back(act_);
+        //field_topvec[i] += act_;
+        //field_topvec_n[i] += 1;
+    }
 
-            if ((dist_to_max > 2 * delta / 3) && (dist_to_max < delta))
-            {
-                indices->push_back(i);
-                cloud->points[i].r =  255;
-                cloud->points[i].g =  0;
-                cloud->points[i].b =  0;
-                field_botvec[addr].push_back(act_);
-                //field_botvec[i] += act_;
-                //field_botvec_n[i] += 1;
-            }*/
-        //}
+    if ((dist_to_max > 2 * delta / 3) && (dist_to_max < delta))
+    {
+        indices->push_back(i);
+        cloud->points[i].r =  255;
+        cloud->points[i].g =  0;
+        cloud->points[i].b =  0;
+        field_botvec[addr].push_back(act_);
+        //field_botvec[i] += act_;
+        //field_botvec_n[i] += 1;
+    }*/
+    //}
     //}
 
     std::cout << " sigma max " << sigma_max  << " sigma min " << sigma_min << std::endl;
@@ -1019,7 +1033,54 @@ void classify_cloud_low(sensor_msgs::PointCloud2 msg, double thickness = 0.04)
     z_max_msg.header = msg.header;
     pct_pub.publish(z_max_msg);
 
+    return parr;
+
 }
+
+
+class FindGraspablesAction
+{
+protected:
+
+    ros::NodeHandle nh_;
+    actionlib::SimpleActionServer<mc_graspable::FindGraspablesAction> as_;
+    std::string action_name_;
+    // create messages that are used to published feedback/result
+    mc_graspable::FindGraspablesFeedback feedback_;
+    mc_graspable::FindGraspablesResult result_;
+
+public:
+
+    FindGraspablesAction(std::string name) :
+        as_(nh_, name, boost::bind(&FindGraspablesAction::executeCB, this, _1), false),
+        action_name_(name)
+    {
+        as_.start();
+        ROS_INFO("ACTION SERVER STARTED");
+    }
+
+    ~FindGraspablesAction(void)
+    {
+    }
+
+    void executeCB(const mc_graspable::FindGraspablesGoalConstPtr &goal)
+    {
+
+        ros::Time time_stamp;
+        sensor_msgs::PointCloud2 msg;
+
+        getCloud(msg, goal->frame_id, ros::Time(0), &time_stamp);
+
+        result_.header.frame_id = goal->frame_id;
+        result_.header.stamp = msg.header.stamp;
+        result_.high = classify_cloud(msg, goal->delta, goal->scaling, goal->pitch_limit);
+        result_.low = classify_cloud_low(msg, goal->thickness);
+
+        as_.setSucceeded(result_);
+    }
+
+
+};
 
 
 int main(int argc, char **argv)
@@ -1037,10 +1098,12 @@ int main(int argc, char **argv)
     marker_pub = nh.advertise<visualization_msgs::Marker>( "/grasp_marker", 10 , true);
     marker_pub_arr = nh.advertise<visualization_msgs::MarkerArray>( "/grasp_marker_array", 10 , true);
 
-    ros::Duration(1).sleep();
+    //ros::Duration(1).sleep();
 
     ros::Rate rt(30);
 
+
+   /*
     // for plates and bowls:
     //bin/mc_graspable 1 0.02 20 0.4
     if (atoi(argv[1]) == 1)
@@ -1136,32 +1199,41 @@ int main(int argc, char **argv)
         classify_cloud(msg, atof(argv[2]));
     }
 
-
-
-    ROS_INFO("DONE");
-
-    ros::Time lastTime = ros::Time::now();
-
-    topic_name = "/camera/rgb/points";
-
-    while (nh.ok())
+    if (atoi(argv[1]) == 7)
     {
-        geometry_msgs::PoseArray pa;
-        bool got = false;
-        while (!got) {
-            pa  = *(ros::topic::waitForMessage<geometry_msgs::PoseArray>("/go"));
-            if (pa.header.stamp != lastTime)
-                got = true;
-        }
-        lastTime = pa.header.stamp;
-        ROS_INFO("GOT A REQUEST");
-        std::cout << pa << std::endl;
-        sensor_msgs::PointCloud2 msg;
-        ros::Time time_stamp;
-        getCloud(msg, "/map", ros::Time(0), &time_stamp);
-        //classify_cloud(msg,0.01);
-        classify_cloud(msg,0.02,20,0.4);
-        classify_cloud_low(msg);
-    }
 
+        ROS_INFO("DONE");
+
+        ros::Time lastTime = ros::Time::now();
+
+        topic_name = "/camera/rgb/points";
+
+        while (nh.ok())
+        {
+            geometry_msgs::PoseArray pa;
+            bool got = false;
+            while (!got)
+            {
+                pa  = *(ros::topic::waitForMessage<geometry_msgs::PoseArray>("/go"));
+                if (pa.header.stamp != lastTime)
+                    got = true;
+            }
+            lastTime = pa.header.stamp;
+            ROS_INFO("GOT A REQUEST");
+            std::cout << pa << std::endl;
+            sensor_msgs::PointCloud2 msg;
+            ros::Time time_stamp;
+            getCloud(msg, "/map", ros::Time(0), &time_stamp);
+            //classify_cloud(msg,0.01);
+            classify_cloud(msg,0.02,20,0.4);
+            classify_cloud_low(msg);
+        }
+
+
+    }
+    */
+
+
+    FindGraspablesAction find_graspables("mc_graspable");
+    ros::spin();
 }

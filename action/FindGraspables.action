@@ -1,0 +1,21 @@
+# we specify the cloud topic (pointcloud2 with rgbd data, only tested with kinect)
+string cloud_topic
+string frame_id
+# the frame_id of bb_min will be used to transform the cloud to, then bb_min and bb_max define the bounding box in that frame
+geometry_msgs/Point aabb_min
+geometry_msgs/Point aabb_max
+# parameters for detection of bowls and plates, usually 0.02 20 0.4
+float64 delta
+float64 scaling
+float64 pitch_limit
+# paramters for detection of chopsticks and silverware, usually 0.04
+float64 thickness
+---
+#result
+Header header
+# grasp poses for the tool_frame for bowls and plates
+geometry_msgs/PoseArray high
+# grasp poses for the tool_frame for silverware, chopsticks etc
+geometry_msgs/PoseArray low
+---
+# no feedback defined
