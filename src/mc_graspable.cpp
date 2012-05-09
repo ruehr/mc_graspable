@@ -529,22 +529,40 @@ geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double del
 
 
 // get the low objects that aren't much higher than the table
-geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double thickness = 0.04, tf::Vector3 min = tf::Vector3(0,0,0), tf::Vector3 max = tf::Vector3(1,1,2))
+geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double scaling = 20, double thickness = 0.04, tf::Vector3 min = tf::Vector3(-2.5,1,0), tf::Vector3 max = tf::Vector3(-1.5,2,2))
 {
+
+    tf::Vector3 size(ceil(max.x() - min.x()) * scaling, ceil(max.y() - min.y()) * scaling, 0); //ceil(max.z() - min.z()) * 100 / scaling);
+
+    std::cout << "size" << size.x() << " " << size.y() << " " << size.z() << std::endl;
+    std::cout << "min" << min.x() << " " << min.y() << " " << min.z() << std::endl;
+    std::cout << "max" << max.x() << " " << max.y() << " " << max.z() << std::endl;
+
     ROS_INFO("classify_low");
-    float field[100 * 100]; // we start with 1x1m 1cm resolution
-    float field_low[100 * 100]; // we start with 1x1m 1cm resolution
-    float field_avg[100 * 100]; // we start with 1x1m 1cm resolution
-    float field_sigma[100 * 100]; // we start with 1x1m 1cm resolution
-    float field_num[100 * 100]; // we start with 1x1m 1cm resolution
-    std::vector<int> field_topvec[100 * 100];
-    std::vector<int> field_botvec[100 * 100];
-    std::vector<int> field_idx[100 * 100]; // idices on tops cloud showing which points lie in which bin
-    std::vector<int> field_idx_class[100 * 100]; // idices on tops cloud showing which points lie in which bin
+    std::vector<float> field;//[100 * 100]; // we start with 1x1m 1cm resolution
+    std::vector<float> field_low;//[100 * 100]; // we start with 1x1m 1cm resolution
+    std::vector<float> field_avg;//[100 * 100]; // we start with 1x1m 1cm resolution
+    std::vector<float> field_sigma;//[100 * 100]; // we start with 1x1m 1cm resolution
+    std::vector<float> field_num;//[100 * 100]; // we start with 1x1m 1cm resolution
+    std::vector<std::vector<int> > field_topvec;//[100 * 100];
+    std::vector<std::vector<int> > field_botvec;//[100 * 100];
+    std::vector<std::vector<int> > field_idx;//[100 * 100]; // idices on tops cloud showing which points lie in which bin
+    std::vector<std::vector<int> > field_idx_class;//[100 * 100]; // idices on tops cloud showing which points lie in which bin
 
-    tf::Vector3 shift(2.5,-1,0);
+    field.resize(size.x()*size.y());
+    field_low.resize(size.x()*size.y());
+    field_avg.resize(size.x()*size.y());
+    field_sigma.resize(size.x()*size.y());
+    field_num.resize(size.x()*size.y());
+    field_topvec.resize(size.x()*size.y());
+    field_botvec.resize(size.x()*size.y());
+    field_idx.resize(size.x()*size.y());
+    field_idx_class.resize(size.x()*size.y());
 
-    for (size_t i = 0; i < 100*100; ++i)
+    //tf::Vector3 shift(2.5,-1,0);
+    tf::Vector3 shift = -min;
+
+    for (size_t i = 0; i < size.x()*size.y(); ++i)
     {
         field[i] = 0;
         field_low[i] = 1000;
@@ -558,18 +576,18 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     pcl::fromROSMsg(msg, *cloud);
 
     //get maxima in z
-    double scaling = 20; // 1 cm = 100
+    //double scaling = 20; // 1 cm = 100
 
     //! get the top points' z coord per bin
     for (size_t i=0; i < cloud->points.size(); ++i)
     {
         tf::Vector3 act(cloud->points[i].x,cloud->points[i].y,cloud->points[i].z);
-        act = act + shift;
-        if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
+        if ((act.x() > min.x()) && (act.y() > min.y()) && (act.y() < max.y()) && (act.x() < max.x()))
         {
+            act = act + shift;
             int xcoord = act.x() * scaling;
             int ycoord = act.y() * scaling;
-            size_t addr = xcoord + ycoord * 100;
+            size_t addr = xcoord + ycoord * size.x();
             if (field[addr] < act.z())
                 field[addr] = act.z();
             if (field_low[addr] > act.z())
@@ -581,12 +599,12 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     for (size_t i=0; i < cloud->points.size(); ++i)
     {
         tf::Vector3 act(cloud->points[i].x,cloud->points[i].y,cloud->points[i].z);
-        act = act + shift;
-        if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
+        if ((act.x() > min.x()) && (act.y() > min.y()) && (act.y() < max.y()) && (act.x() < max.x()))
         {
+            act = act + shift;
             int xcoord = act.x() * scaling;
             int ycoord = act.y() * scaling;
-            size_t addr = xcoord + ycoord * 100;
+            size_t addr = xcoord + ycoord * size.x();
             if ((field_low[addr] > act.z()) && (act.z() > field[addr] - .1))
                 field_low[addr] = act.z();
         }
@@ -598,12 +616,12 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     for (size_t i=0; i < cloud->points.size(); ++i)
     {
         tf::Vector3 act(cloud->points[i].x,cloud->points[i].y,cloud->points[i].z);
-        act = act + shift;
-        if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
+        if ((act.x() > min.x()) && (act.y() > min.y()) && (act.y() < max.y()) && (act.x() < max.x()))
         {
+            act = act + shift;
             int xcoord = act.x() * scaling;
             int ycoord = act.y() * scaling;
-            size_t addr = xcoord + ycoord * 100;
+            size_t addr = xcoord + ycoord * size.x();
             //if (field[addr] - field_low[addr] < 0.1)
             //if (act.z() > 0.8)
             //if (act.z() < 0.88)
@@ -621,7 +639,7 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     ei2.setIndices(top_indices);
     ei2.filter(*tops);
 
-    for (size_t i = 0; i < 100*100; ++i)
+    for (size_t i = 0; i < size.y()*size.x(); ++i)
     {
         field[i] = 0;
         field_low[i] = 1000;
@@ -633,12 +651,12 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     for (size_t i=0; i < tops->points.size(); ++i)
     {
         tf::Vector3 act(tops->points[i].x,tops->points[i].y,tops->points[i].z);
-        act = act + shift;
-        if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
+        //if ((act.x() > min.x()) && (act.y() > min.y()) && (act.y() < max.y()) && (act.x() < max.x()))
         {
+            act = act + shift;
             int xcoord = act.x() * scaling;
             int ycoord = act.y() * scaling;
-            size_t addr = xcoord + ycoord * 100;
+            size_t addr = xcoord + ycoord * size.x();
             if (field[addr] < act.z())
                 field[addr] = act.z();
             if (field_low[addr] > act.z())
@@ -649,12 +667,13 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     for (size_t i=0; i < tops->points.size(); ++i)
     {
         tf::Vector3 act(tops->points[i].x,tops->points[i].y,tops->points[i].z);
-        act = act + shift;
-        if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
+        //act = act + shift;
+        //if ((act.x() > min.x()) && (act.y() > min.y()) && (act.y() < max.y()) && (act.x() < max.x()))
         {
+            act = act + shift;
             int xcoord = act.x() * scaling;
             int ycoord = act.y() * scaling;
-            size_t addr = xcoord + ycoord * 100;
+            size_t addr = xcoord + ycoord * size.x();
             //if (field[addr] - field_low[addr] < 0.0)
             //  if (act.z() < 0.88)
             //    if (act.z() - field[addr] > -.02)
@@ -666,11 +685,11 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     }
 
 
-    for (size_t y = 0; y < scaling; ++y)
+    for (size_t y = 0; y < size.y(); ++y)
     {
-        for (size_t x = 0; x < scaling; ++x)
+        for (size_t x = 0; x < size.x(); ++x)
         {
-            size_t addr = x + y * 100;
+            size_t addr = x + y * size.x();
             if (field_num[addr] > 0)
             {
                 field_avg[addr] = field_avg[addr] / field_num[addr];
@@ -682,12 +701,12 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     for (size_t i=0; i < tops->points.size(); ++i)
     {
         tf::Vector3 act(tops->points[i].x,tops->points[i].y,tops->points[i].z);
-        act = act + shift;
-        if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
+        //if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
         {
+            act = act + shift;
             int xcoord = act.x() * scaling;
             int ycoord = act.y() * scaling;
-            size_t addr = xcoord + ycoord * 100;
+            size_t addr = xcoord + ycoord * size.x();
 
             field_sigma[addr] += (act.z() - field_avg[addr]) * (act.z() - field_avg[addr]);
             field_num[addr]++;
@@ -697,11 +716,11 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     double sigma_max = -10000;
     double sigma_min = 10000;
 
-    for (size_t y = 0; y < scaling; ++y)
+    for (size_t y = 0; y < size.y(); ++y)
     {
-        for (size_t x = 0; x < scaling; ++x)
+        for (size_t x = 0; x < size.x(); ++x)
         {
-            size_t addr = x + y * 100;
+            size_t addr = x + y * size.x();
             if (field_num[addr] > 0)
             {
                 field_sigma[addr] = sqrt(field_sigma[addr] / field_num[addr]);
@@ -724,11 +743,11 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     {
         tf::Vector3 act_(tops->points[i].x,tops->points[i].y,tops->points[i].z);
         tf::Vector3 act = act_ + shift;
-        if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
+        //if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
         {
             int xcoord = act.x() * scaling;
             int ycoord = act.y() * scaling;
-            size_t addr = xcoord + ycoord * 100;
+            size_t addr = xcoord + ycoord * size.x();
 
             field_idx[addr].push_back(i);
         }
@@ -738,11 +757,11 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     double max_c = -10000;
     int t = 0;
     for (t = 0; t <= 1; t++)
-        for (size_t y = 0; y < scaling; ++y)
+        for (size_t y = 0; y < size.y(); ++y)
         {
-            for (size_t x = 0; x < scaling; ++x)
+            for (size_t x = 0; x < size.x(); ++x)
             {
-                size_t addr = x + y * 100;
+                size_t addr = x + y * size.x();
                 if ((field_idx[addr].size() > 10))
                 {
                     int id0 = field_idx[addr][0];
@@ -803,11 +822,11 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
     parr.header.frame_id = msg.header.frame_id;
     parr.header.stamp = ros::Time::now();
 
-    for (size_t y = 0; y < scaling; ++y)
+    for (size_t y = 0; y < size.y(); ++y)
     {
-        for (size_t x = 0; x < scaling; ++x)
+        for (size_t x = 0; x < size.x(); ++x)
         {
-            size_t addr = x + y * 100;
+            size_t addr = x + y * size.x();
             if ((field_idx_class[addr].size() > 10))
             {
                 std::vector<tf::Vector3> pts;
@@ -1087,7 +1106,7 @@ public:
         result_.header.frame_id = goal->frame_id;
         result_.header.stamp = msg.header.stamp;
         result_.high = classify_cloud(msg, goal->delta, goal->scaling, goal->pitch_limit);
-        result_.low = classify_cloud_low(msg, goal->thickness);
+        result_.low = classify_cloud_low(msg, goal->scaling, goal->thickness);
 
         as_.setSucceeded(result_);
     }
@@ -1184,7 +1203,7 @@ int main(int argc, char **argv)
                 ROS_INFO("GOT THE CLOUD FROM THE BAG");
                 out_msg.header.stamp = ros::Time::now();
                 pct_pub.publish(out_msg);
-                classify_cloud_low(out_msg);
+                classify_cloud_low(out_msg, 20);
             }
 
         }
@@ -1198,7 +1217,7 @@ int main(int argc, char **argv)
         //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
         sensor_msgs::PointCloud2 msg;
         getCloud(msg, "/map", ros::Time(0), &time_stamp);
-        classify_cloud_low(msg);
+        classify_cloud_low(msg, 20);
     }
 
     if (atoi(argv[1]) == 6)
@@ -1239,7 +1258,7 @@ int main(int argc, char **argv)
             getCloud(msg, "/map", ros::Time(0), &time_stamp);
             //classify_cloud(msg,0.01);
             classify_cloud(msg,0.02,20,0.4);
-            classify_cloud_low(msg);
+            classify_cloud_low(msg, 20);
         }
 
 
