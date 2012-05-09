@@ -21,11 +21,11 @@ int main (int argc, char **argv)
 
   goal.cloud_topic = "/kinect/rgb/points";
   goal.frame_id = "/map";
-  goal.aabb_min.x = -2.1;
+  goal.aabb_min.x = -2.5;
   goal.aabb_min.y = 1;
   goal.aabb_min.z = .5;
-  goal.aabb_max.x = -1.6;
-  goal.aabb_max.y = 1.5;
+  goal.aabb_max.x = -1.5;
+  goal.aabb_max.y = 2;
   goal.aabb_max.z = 1.5;
   goal.delta = 0.02;
   goal.scaling = 20;

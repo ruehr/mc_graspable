@@ -40,6 +40,10 @@ ros::Publisher parr_flat_pub;
 ros::Publisher marker_pub;
 ros::Publisher marker_pub_arr;
 
+ros::Publisher marker_low_pub;
+ros::Publisher marker_low_pub_arr;
+
+
 std::string topic_name = "/kinect/cloud_throttled";
 
 void getCloud(sensor_msgs::PointCloud2 &cloud_msg, std::string frame_id, ros::Time after, ros::Time *tm)
@@ -346,7 +350,7 @@ geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double del
         //act = act + shift;
         if ((act.x() > min.x()) && (act.y() > min.y()) && (act.y() < max.y()) && (act.x() < max.x()))
         {
-                //std::cout << "act" << act.x() << " " <<act.y() << " " << act.z() << std::endl;
+            //std::cout << "act" << act.x() << " " <<act.y() << " " << act.z() << std::endl;
 
             act = act + shift;
             int xcoord = act.x() * scaling;
@@ -494,7 +498,7 @@ geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double del
                 tf::poseTFToMsg(pose,pose_msg);
                 parr.poses.push_back(pose_msg);
                 std::cout << "bin/ias_drawer_executive -3 0 " << pose_msg.position.x << " " << pose_msg.position.y << " " << pose_msg.position.z + .1 << " "
-                        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl;
+                          << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl;
                 //std::cout << "bin/ias_drawer_executive -3 0 " << pose_msg.position.x << " " << pose_msg.position.y << " " << pose_msg.position.z << " "
                 //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl << std::endl;
 
@@ -697,7 +701,7 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
             field_num[addr] = 0;
         }
     }
-
+    /*
     for (size_t i=0; i < tops->points.size(); ++i)
     {
         tf::Vector3 act(tops->points[i].x,tops->points[i].y,tops->points[i].z);
@@ -712,10 +716,12 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
             field_num[addr]++;
         }
     }
+    */
 
     double sigma_max = -10000;
     double sigma_min = 10000;
 
+    /*
     for (size_t y = 0; y < size.y(); ++y)
     {
         for (size_t x = 0; x < size.x(); ++x)
@@ -734,6 +740,7 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
             }
         }
     }
+    */
 
     boost::shared_ptr<std::vector<int> > indices( new std::vector<int> );
 
@@ -797,7 +804,7 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
                                     min_c = col;
                             }
                             col = (col - min_c) / (max_c - min_c) * 255;
-                            if ((t ==1) && (col > 50))
+                            if ((t ==1) && (col > 50)) //!TODO: this is a magic threshold
                             {
                                 tops->points[*it].r = 255;
                                 tops->points[*it].g = 0;
@@ -896,158 +903,11 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
 
     std::cout << "col limits " << min_c << " " << max_c << std::endl;
 
-    marker_pub_arr.publish(marr);
-
-
-    //if (fabs(field[xcoord + ycoord * 100] - act.z()) < 0.0000000001)
-    /*
-    double dist_to_max = fabs(field[addr] - act.z());
-    double dist_to_min = fabs(field_low[addr] - act.z());
-    double dist_to_avg = act.z() - field_avg[addr];
-    float fac =  dist_to_max / .02;
-    //if (dist_to_max == 0)
-    //  indices->push_back(i);
-    //if (act.z() > field_avg[addr] + 0.01)
-    //if (field_sigma[addr] < 0.0025)
-    if (act.z() < field_avg[addr] + 0.003)
-    {
-        tops->points[i].z =  field_avg[addr];
-        tops->points[i].r = 255;
-        tops->points[i].g = 0;
-        tops->points[i].b = 0;
-    }
-
-    indices->push_back(i);
-    //    std::cout << "si " << field_sigma[addr];
-    */
-
-    //if (act.z() > field_avg[addr] + 2 * field_sigma[addr])
-
-    /*if (fabs(act_.x() + 1.63) < 0.02)
-        if (fabs(act_.y() - 1.5) < 0.02)
-        {
-            std::cout << "field_sigma " << field_sigma[addr] << std::endl;
-            std::cout << "field_avg" << field_avg[addr] << std::endl;
-            std::cout << "field_low " << field_low[addr] << std::endl;
-            std::cout << "field" << field[addr] << std::endl;
-        }*/
-
-    //tops->points[i].r = ((field_sigma[addr] - sigma_min) / (sigma_max - sigma_min)) * 255;
-    //tops->points[i].g = tops->points[i].r ;
-    //tops->points[i].b = tops->points[i].r ;
-
-    /*if (dist_to_max < delta / 3)
-    {
-        indices->push_back(i);
-        cloud->points[i].r =  0;
-        cloud->points[i].g =  0;
-        cloud->points[i].b =  255;
-        field_topvec[addr].push_back(act_);
-        //field_topvec[i] += act_;
-        //field_topvec_n[i] += 1;
-    }
-
-    if ((dist_to_max > 2 * delta / 3) && (dist_to_max < delta))
-    {
-        indices->push_back(i);
-        cloud->points[i].r =  255;
-        cloud->points[i].g =  0;
-        cloud->points[i].b =  0;
-        field_botvec[addr].push_back(act_);
-        //field_botvec[i] += act_;
-        //field_botvec_n[i] += 1;
-    }*/
-    //}
-    //}
+    marker_low_pub_arr.publish(marr);
 
     std::cout << " sigma max " << sigma_max  << " sigma min " << sigma_min << std::endl;
 
     std::cout << std::endl;
-
-
-
-    //visualization_msgs::MarkerArray marr;
-    /*
-    for (size_t y = 0; y < scaling; ++y)
-    {
-        for (size_t x = 0; x < scaling; ++x)
-        {
-            size_t addr = x + y * 100;
-            if ((field_topvec[addr].size() > 10) && (field_botvec[addr].size() > 10))
-            {
-                tf::Vector3 top(0,0,0);
-                tf::Vector3 bot(0,0,0);
-                for (std::vector<tf::Vector3>::iterator it = field_topvec[addr].begin(); it != field_topvec[addr].end(); ++it)
-                    top += *it;
-                top /= field_topvec[addr].size();
-                for (std::vector<tf::Vector3>::iterator it = field_botvec[addr].begin(); it != field_botvec[addr].end(); ++it)
-                    bot += *it;
-                bot /= field_botvec[addr].size();
-
-                double top_at = 0;
-                double bot_at = 0;
-                double num_at = 0;
-                for (std::vector<tf::Vector3>::iterator it = field_topvec[addr].begin(); it != field_topvec[addr].end(); ++it)
-                {
-                    tf::Vector3 rel = *it - top;
-                    if (fabs(rel.x()) > 0.00000000001)
-                    {
-                        top_at += atan(rel.y()/rel.x());
-                        num_at++;
-                    }
-                }
-                for (std::vector<tf::Vector3>::iterator it = field_botvec[addr].begin(); it != field_botvec[addr].end(); ++it)
-                {
-                    tf::Vector3 rel = *it - bot;
-                    if (fabs(rel.x()) > 0.00000000001)
-                    {
-                        top_at += atan(rel.y()/rel.x());
-                        num_at++;
-                    }
-                }
-                top_at /= num_at;
-
-                tf::Vector3 x_axis = top - bot;
-                tf::Vector3 y_axis = tf::Vector3(cos(top_at),sin(top_at),0);
-                tf::Vector3 z_axis = (x_axis.cross(y_axis)).normalize();
-                x_axis = (y_axis.cross(z_axis)).normalize();
-                y_axis = (z_axis.cross(x_axis)).normalize();
-
-                if (x_axis.x() != x_axis.x())
-                {
-                    continue;
-                }
-
-                if (top.z() < 0.9)
-                    continue;
-
-                //ROS_INFO("x_AXIS %f %f %f len %f", x_axis.x(), x_axis.y(), x_axis.z(), x_axis.length());
-                //ROS_INFO("y_AXIS %f %f %f len %f", y_axis.x(), y_axis.y(), y_axis.z(), y_axis.length());
-                //ROS_INFO("z_AXIS %f %f %f len %f", z_axis.x(), z_axis.y(), z_axis.z(), z_axis.length());
-
-                btMatrix3x3 rot(x_axis.x(), y_axis.x(), z_axis.x(),
-                                x_axis.y(), y_axis.y(), z_axis.y(),
-                                x_axis.z(), y_axis.z(), z_axis.z());
-                btQuaternion rot_quat;
-                rot.getRotation(rot_quat);
-
-                tf::Pose pose;
-                pose.setOrigin(bot);
-                pose.setRotation(rot_quat);
-                geometry_msgs::Pose pose_msg;
-                tf::poseTFToMsg(pose,pose_msg);
-                parr.poses.push_back(pose_msg);
-
-                addMarker(marr, pose);
-
-                //pose.setOrigin(bot + tf::Vector3(0.005,0.005,0));
-                //tf::poseTFToMsg(pose,pose_msg);
-                //parr.poses.push_back(pose_msg);
-
-            }
-        }
-    }
-    */
 
     //marker_pub_arr.publish(marr);
 
@@ -1129,140 +989,147 @@ int main(int argc, char **argv)
     parr_flat_pub = nh.advertise<geometry_msgs::PoseArray>( "/flat_grasp_poses", 10 , true);
     marker_pub = nh.advertise<visualization_msgs::Marker>( "/grasp_marker", 10 , true);
     marker_pub_arr = nh.advertise<visualization_msgs::MarkerArray>( "/grasp_marker_array", 10 , true);
+    marker_low_pub= nh.advertise<visualization_msgs::Marker>( "/grasp_low_marker", 10 , true);
+    marker_low_pub_arr = nh.advertise<visualization_msgs::MarkerArray>( "/grasp_low_marker_array", 10 , true);
 
     //ros::Duration(1).sleep();
 
     ros::Rate rt(30);
 
 
-
-    // for plates and bowls:
-    //bin/mc_graspable 1 0.02 20 0.4
-    if (atoi(argv[1]) == 1)
+    if ((argc > 1) && (atof(argv[1]) > 0))
     {
-        //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
-        ros::Time time_stamp;
-        //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
-        sensor_msgs::PointCloud2 out_msg;
-        getCloud(out_msg, "/map", ros::Time(0), &time_stamp);
-        //classify_cloud(msg);
-        classify_cloud(out_msg, atof(argv[2]), atof(argv[3]), atof(argv[4]));
-    }
 
-    if (atoi(argv[1]) == 2)
-    {
-        rosbag::Bag bag;
-        bag.open(argv[2], rosbag::bagmode::Read);
-        rosbag::View view(bag);
-
-        BOOST_FOREACH(rosbag::MessageInstance const m, view)
+        // for plates and bowls:
+        //bin/mc_graspable 1 0.02 20 0.4
+        if (atoi(argv[1]) == 1)
         {
-            std::string topicname = m.getTopic();
-            //ROS_INFO("topic of msg: |%s|", topicname.c_str());
-            sensor_msgs::PointCloud2::ConstPtr msg = m.instantiate<sensor_msgs::PointCloud2>();
-            if (msg != NULL)
-            {
-                sensor_msgs::PointCloud2 out_msg = *msg;
-                ROS_INFO("GOT THE CLOUD FROM THE BAG");
-                out_msg.header.stamp = ros::Time::now();
-                pct_pub.publish(out_msg);
-                classify_cloud(out_msg, atof(argv[3]), atof(argv[4]), atof(argv[5]));
-            }
-
-        }
-    }
-
-    if (atoi(argv[1]) == 3)
-    {
-        //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
-        ros::Time time_stamp;
-        //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
-        sensor_msgs::PointCloud2 msg;
-        getCloud(msg, "/map", ros::Time(0), &time_stamp);
-        rosbag::Bag bag;
-        bag.open(argv[2], rosbag::bagmode::Write);
-        bag.write("cloud", ros::Time::now(), msg);
-        bag.close();
-    }
-
-
-    if (atoi(argv[1]) == 4)
-    {
-        rosbag::Bag bag;
-        bag.open(argv[2], rosbag::bagmode::Read);
-        rosbag::View view(bag);
-
-        BOOST_FOREACH(rosbag::MessageInstance const m, view)
-        {
-            std::string topicname = m.getTopic();
-            //ROS_INFO("topic of msg: |%s|", topicname.c_str());
-            sensor_msgs::PointCloud2::ConstPtr msg = m.instantiate<sensor_msgs::PointCloud2>();
-            if (msg != NULL)
-            {
-                sensor_msgs::PointCloud2 out_msg = *msg;
-                ROS_INFO("GOT THE CLOUD FROM THE BAG");
-                out_msg.header.stamp = ros::Time::now();
-                pct_pub.publish(out_msg);
-                classify_cloud_low(out_msg, 20);
-            }
-
-        }
-    }
-
-    if (atoi(argv[1]) == 5)
-    {
-        topic_name = "/camera/rgb/points";
-        //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
-        ros::Time time_stamp;
-        //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
-        sensor_msgs::PointCloud2 msg;
-        getCloud(msg, "/map", ros::Time(0), &time_stamp);
-        classify_cloud_low(msg, 20);
-    }
-
-    if (atoi(argv[1]) == 6)
-    {
-        topic_name = "/camera/rgb/points";
-        //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
-        ros::Time time_stamp;
-        //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
-        sensor_msgs::PointCloud2 msg;
-        getCloud(msg, "/map", ros::Time(0), &time_stamp);
-        classify_cloud(msg, atof(argv[2]));
-    }
-
-    if (atoi(argv[1]) == 7)
-    {
-
-        ROS_INFO("DONE");
-
-        ros::Time lastTime = ros::Time::now();
-
-        topic_name = "/camera/rgb/points";
-
-        while (nh.ok())
-        {
-            geometry_msgs::PoseArray pa;
-            bool got = false;
-            while (!got)
-            {
-                pa  = *(ros::topic::waitForMessage<geometry_msgs::PoseArray>("/go"));
-                if (pa.header.stamp != lastTime)
-                    got = true;
-            }
-            lastTime = pa.header.stamp;
-            ROS_INFO("GOT A REQUEST");
-            std::cout << pa << std::endl;
-            sensor_msgs::PointCloud2 msg;
+            //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
             ros::Time time_stamp;
+            //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
+            sensor_msgs::PointCloud2 out_msg;
+            getCloud(out_msg, "/map", ros::Time(0), &time_stamp);
+            //classify_cloud(msg);
+            classify_cloud(out_msg, atof(argv[2]), atof(argv[3]), atof(argv[4]));
+        }
+
+        if (atoi(argv[1]) == 2)
+        {
+            rosbag::Bag bag;
+            bag.open(argv[2], rosbag::bagmode::Read);
+            rosbag::View view(bag);
+
+            BOOST_FOREACH(rosbag::MessageInstance const m, view)
+            {
+                std::string topicname = m.getTopic();
+                //ROS_INFO("topic of msg: |%s|", topicname.c_str());
+                sensor_msgs::PointCloud2::ConstPtr msg = m.instantiate<sensor_msgs::PointCloud2>();
+                if (msg != NULL)
+                {
+                    sensor_msgs::PointCloud2 out_msg = *msg;
+                    ROS_INFO("GOT THE CLOUD FROM THE BAG");
+                    out_msg.header.stamp = ros::Time::now();
+                    pct_pub.publish(out_msg);
+                    classify_cloud(out_msg, atof(argv[3]), atof(argv[4]), atof(argv[5]));
+                }
+
+            }
+        }
+
+        if (atoi(argv[1]) == 3)
+        {
+            //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+            ros::Time time_stamp;
+            //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
+            sensor_msgs::PointCloud2 msg;
             getCloud(msg, "/map", ros::Time(0), &time_stamp);
-            //classify_cloud(msg,0.01);
-            classify_cloud(msg,0.02,20,0.4);
+            rosbag::Bag bag;
+            bag.open(argv[2], rosbag::bagmode::Write);
+            bag.write("cloud", ros::Time::now(), msg);
+            bag.close();
+        }
+
+
+        if (atoi(argv[1]) == 4)
+        {
+            rosbag::Bag bag;
+            bag.open(argv[2], rosbag::bagmode::Read);
+            rosbag::View view(bag);
+
+            BOOST_FOREACH(rosbag::MessageInstance const m, view)
+            {
+                std::string topicname = m.getTopic();
+                //ROS_INFO("topic of msg: |%s|", topicname.c_str());
+                sensor_msgs::PointCloud2::ConstPtr msg = m.instantiate<sensor_msgs::PointCloud2>();
+                if (msg != NULL)
+                {
+                    sensor_msgs::PointCloud2 out_msg = *msg;
+                    ROS_INFO("GOT THE CLOUD FROM THE BAG");
+                    out_msg.header.stamp = ros::Time::now();
+                    pct_pub.publish(out_msg);
+                    classify_cloud_low(out_msg, 20);
+                }
+
+            }
+        }
+
+        if (atoi(argv[1]) == 5)
+        {
+            topic_name = "/camera/rgb/points";
+            //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+            ros::Time time_stamp;
+            //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
+            sensor_msgs::PointCloud2 msg;
+            getCloud(msg, "/map", ros::Time(0), &time_stamp);
             classify_cloud_low(msg, 20);
         }
 
+        if (atoi(argv[1]) == 6)
+        {
+            topic_name = "/camera/rgb/points";
+            //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+            ros::Time time_stamp;
+            //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
+            sensor_msgs::PointCloud2 msg;
+            getCloud(msg, "/map", ros::Time(0), &time_stamp);
+            classify_cloud(msg, atof(argv[2]));
+        }
+
+        if (atoi(argv[1]) == 7)
+        {
+
+            ROS_INFO("DONE");
+
+            ros::Time lastTime = ros::Time::now();
+
+            topic_name = "/camera/rgb/points";
+
+            while (nh.ok())
+            {
+                geometry_msgs::PoseArray pa;
+                bool got = false;
+                while (!got)
+                {
+                    pa  = *(ros::topic::waitForMessage<geometry_msgs::PoseArray>("/go"));
+                    if (pa.header.stamp != lastTime)
+                        got = true;
+                }
+                lastTime = pa.header.stamp;
+                ROS_INFO("GOT A REQUEST");
+                std::cout << pa << std::endl;
+                sensor_msgs::PointCloud2 msg;
+                ros::Time time_stamp;
+                getCloud(msg, "/map", ros::Time(0), &time_stamp);
+                //classify_cloud(msg,0.01);
+                classify_cloud(msg,0.02,20,0.4);
+                classify_cloud_low(msg, 20);
+            }
+
+
+        }
 
     }
+
 
 
 
