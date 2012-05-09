@@ -303,18 +303,28 @@ void pos_eigen_zcol(std::vector<int> &idx, pcl::PointCloud<pcl::PointXYZRGB>::Pt
 
 
 //! get top grasp points on rims of objects
-geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double scaling = 20, double pitch_limit = 100, tf::Vector3 min = tf::Vector3(0,0,0), tf::Vector3 max = tf::Vector3(1,1,2))
+geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double scaling = 20, double pitch_limit = 100, tf::Vector3 min = tf::Vector3(-2.5,1,0), tf::Vector3 max = tf::Vector3(-1.5,2,2))
 {
     ROS_INFO("classify");
 
-    int y_mult = (max.y - min.x) * 100 / scaling;
-    float field[100 * 100]; // we start with 1x1m 1cm resolution
-    std::vector<tf::Vector3> field_topvec[100 * 100];
-    std::vector<tf::Vector3> field_botvec[100 * 100];
-    std::vector<tf::Vector3> field_vec[100 * 100];
+    tf::Vector3 size(ceil(max.x() - min.x()) * scaling, ceil(max.y() - min.y()) * scaling, 0); //ceil(max.z() - min.z()) * 100 / scaling);
+
+    std::cout << "size" << size.x() << " " << size.y() << " " << size.z() << std::endl;
+    std::cout << "min" << min.x() << " " << min.y() << " " << min.z() << std::endl;
+    std::cout << "max" << max.x() << " " << max.y() << " " << max.z() << std::endl;
+
+    std::vector<float> field; //[100 * 100]; // we start with 1x1m 1cm resolution
+    std::vector<std::vector<tf::Vector3> > field_topvec; //[100 * 100];
+    std::vector<std::vector<tf::Vector3> > field_botvec;// [100 * 100];
+    std::vector<std::vector<tf::Vector3> > field_vec; //[100 * 100];
+
+    field.resize(size.x() * size.y());
+    field_topvec.resize(size.x() * size.y());
+    field_botvec.resize(size.x() * size.y());
+    field_vec.resize(size.x() * size.y()    );
 
     // field of maximum z values in an x/y bin
-    for (size_t i = 0; i < 100*100; ++i)
+    for (size_t i = 0; i < size.x()*size.y(); ++i)
     {
         field[i] = 0;
     }
@@ -329,17 +339,20 @@ geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double del
     //! coordinate frame, so moving around could also be done by transforming the msg to
     //! another coord frame.
     //double scaling = 20; // 1 cm resolution => scaling 100  10cm => scaling 10
-    tf::Vector3 shift(2.5,-1,0); // shift the data
+    tf::Vector3 shift = -min; //(2.5,-1,0); // shift the data
     for (size_t i=0; i < cloud->points.size(); ++i)
     {
         tf::Vector3 act(cloud->points[i].x,cloud->points[i].y,cloud->points[i].z);
-        act = act + shift;
-        if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
+        //act = act + shift;
+        if ((act.x() > min.x()) && (act.y() > min.y()) && (act.y() < max.y()) && (act.x() < max.x()))
         {
+                //std::cout << "act" << act.x() << " " <<act.y() << " " << act.z() << std::endl;
+
+            act = act + shift;
             int xcoord = act.x() * scaling;
             int ycoord = act.y() * scaling;
-            if (field[xcoord + ycoord * 100] < act.z())
-                field[xcoord + ycoord * 100] = act.z();
+            if (field[xcoord + ycoord * size.x()] < act.z())
+                field[xcoord + ycoord * size.x()] = act.z();
         }
     }
 
@@ -353,14 +366,14 @@ geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double del
     for (size_t i=0; i < cloud->points.size(); ++i)
     {
         tf::Vector3 act_(cloud->points[i].x,cloud->points[i].y,cloud->points[i].z);
-        tf::Vector3 act = act_ + shift;
-        if ((act.x() > 0) && (act.y() > 0) && (act.y() < 1) && (act.x() < 1))
+        if ((act_.x() > min.x()) && (act_.y() > min.y()) && (act_.y() < max.y()) && (act_.x() <max.x()))
         {
+            tf::Vector3 act = act_ + shift;
             int xcoord = act.x() * scaling;
             int ycoord = act.y() * scaling;
-            size_t addr = xcoord + ycoord * 100;
+            size_t addr = xcoord + ycoord * size.x();
             //if (fabs(field[xcoord + ycoord * 100] - act.z()) < 0.0000000001)
-            double dist_to_max = fabs(field[xcoord + ycoord * 100] - act.z());
+            double dist_to_max = fabs(field[xcoord + ycoord * size.x()] - act.z());
             float fac =  dist_to_max / .02;
 
             if (dist_to_max < delta * 4)
@@ -400,11 +413,11 @@ geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double del
     visualization_msgs::MarkerArray marr;
 
 
-    for (size_t y = 0; y < scaling; ++y)
+    for (size_t y = 0; y < size.y(); ++y)
     {
-        for (size_t x = 0; x < scaling; ++x)
+        for (size_t x = 0; x < size.x(); ++x)
         {
-            size_t addr = x + y * 100;
+            size_t addr = x + y * size.x();
             // for each bin, check if we have some points int the top and bottom set
             //if ((field_topvec[addr].size() >10) && (field_botvec[addr].size() > 10))
             if ((field_topvec[addr].size() >10) && (field_botvec[addr].size() > 10))
@@ -480,8 +493,8 @@ geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double del
                 geometry_msgs::Pose pose_msg;
                 tf::poseTFToMsg(pose,pose_msg);
                 parr.poses.push_back(pose_msg);
-                //std::cout << "bin/ias_drawer_executive -3 0 " << pose_msg.position.x << " " << pose_msg.position.y << " " << pose_msg.position.z + .1 << " "
-                //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl;
+                std::cout << "bin/ias_drawer_executive -3 0 " << pose_msg.position.x << " " << pose_msg.position.y << " " << pose_msg.position.z + .1 << " "
+                        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl;
                 //std::cout << "bin/ias_drawer_executive -3 0 " << pose_msg.position.x << " " << pose_msg.position.y << " " << pose_msg.position.z << " "
                 //        << pose_msg.orientation.x << " " << pose_msg.orientation.y << " " << pose_msg.orientation.z << " " << pose_msg.orientation.w <<  std::endl << std::endl;
 
@@ -1103,7 +1116,7 @@ int main(int argc, char **argv)
     ros::Rate rt(30);
 
 
-   /*
+
     // for plates and bowls:
     //bin/mc_graspable 1 0.02 20 0.4
     if (atoi(argv[1]) == 1)
@@ -1231,7 +1244,7 @@ int main(int argc, char **argv)
 
 
     }
-    */
+
 
 
     FindGraspablesAction find_graspables("mc_graspable");
