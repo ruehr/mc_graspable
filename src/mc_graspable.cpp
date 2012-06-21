@@ -61,7 +61,7 @@ void getCloud(sensor_msgs::PointCloud2 &cloud_msg, std::string frame_id, ros::Ti
             found = true;
         else
         {
-            ROS_ERROR("getKinectCloudXYZ cloud too old : stamp %f , target time %f",pc.header.stamp.toSec(), after.toSec());
+            ROS_ERROR("getCloud cloud too old : stamp %f , target time %f",pc.header.stamp.toSec(), after.toSec());
         }
     }
     if (tm)
@@ -82,6 +82,8 @@ void getCloud(sensor_msgs::PointCloud2 &cloud_msg, std::string frame_id, ros::Ti
 
 int marker_ids_ = 0;
 
+
+
 // add a "gripper" marker
 void addMarker(visualization_msgs::MarkerArray &marr, tf::Pose pose, double x = 0.05, double y= 0.05, double z= 0.05, bool gripper = true)
 {
@@ -100,7 +102,7 @@ void addMarker(visualization_msgs::MarkerArray &marr, tf::Pose pose, double x = 
     marker.pose.orientation.z = pose.getRotation().z();
     marker.pose.orientation.w = pose.getRotation().w();
 
-    marker.lifetime = ros::Duration(10);
+    marker.lifetime = ros::Duration(1);
     marker.scale.x = 0.01;
     marker.scale.y = 0.01;
     marker.scale.z = z;
@@ -992,13 +994,15 @@ int main(int argc, char **argv)
     marker_low_pub= nh.advertise<visualization_msgs::Marker>( "/grasp_low_marker", 10 , true);
     marker_low_pub_arr = nh.advertise<visualization_msgs::MarkerArray>( "/grasp_low_marker_array", 10 , true);
 
-    //ros::Duration(1).sleep();
+
 
     ros::Rate rt(30);
 
 
     if ((argc > 1) && (atof(argv[1]) > 0))
     {
+
+        ros::Duration(1).sleep();
 
         // for plates and bowls:
         //bin/mc_graspable 1 0.02 20 0.4
@@ -1093,6 +1097,26 @@ int main(int argc, char **argv)
             sensor_msgs::PointCloud2 msg;
             getCloud(msg, "/map", ros::Time(0), &time_stamp);
             classify_cloud(msg, atof(argv[2]));
+        }
+
+
+        if (atoi(argv[1]) == 66)
+        {
+            topic_name = "/camera/rgb/points";
+            //pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+
+            while (ros::ok())
+            {
+
+                ros::Time time_stamp;
+                //getCloud(cloud,"/map",ros::Time(0), &time_stamp);
+                sensor_msgs::PointCloud2 msg;
+                getCloud(msg, "/map", ros::Time(0), &time_stamp);
+                tf::Vector3 approx_center ( atof(argv[2]),  atof(argv[3]),  atof(argv[4]));
+
+                classify_cloud(msg, 0.02,20,0.4,approx_center - tf::Vector3(0.4,0.4,0), approx_center + tf::Vector3(0.4,0.4,0.5));
+            }
+            //geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double delta = 0.04, double scaling = 20, double pitch_limit = 100, tf::Vector3 min = tf::Vector3(-2.5,1,0), tf::Vector3 max = tf::Vector3(-1.5,2,2)
         }
 
         if (atoi(argv[1]) == 7)
