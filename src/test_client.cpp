@@ -19,13 +19,13 @@ int main (int argc, char **argv)
   // send a goal to the action
   mc_graspable::FindGraspablesGoal goal;
 
-  goal.cloud_topic = "/kinect/rgb/points";
+  goal.cloud_topic = "/camera/rgb/points";
   goal.frame_id = "/map";
-  goal.aabb_min.x = -2.5;
-  goal.aabb_min.y = 1;
+  goal.aabb_min.x = atof(argv[1]);
+  goal.aabb_min.y = atof(argv[2]);
   goal.aabb_min.z = .5;
-  goal.aabb_max.x = -1.5;
-  goal.aabb_max.y = 2;
+  goal.aabb_max.x = atof(argv[3]);
+  goal.aabb_max.y = atof(argv[4]);
   goal.aabb_max.z = 1.5;
   goal.delta = 0.02;
   goal.scaling = 20;

@@ -44,33 +44,51 @@ ros::Publisher marker_low_pub;
 ros::Publisher marker_low_pub_arr;
 
 
-std::string topic_name = "/kinect/cloud_throttled";
+std::string topic_name = "/camera/rgb/points";
+
 
 void getCloud(sensor_msgs::PointCloud2 &cloud_msg, std::string frame_id, ros::Time after, ros::Time *tm)
 {
-
-    sensor_msgs::PointCloud2 pc;// = *(ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/kinect/cloud_throttled"));
-    bool found = false;
-    while (!found)
+    bool could_convert = false;
+    while (!could_convert)
     {
-        //pc  = *(ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/kinect/cloud_throttled"));
-        ROS_INFO("BEFORE");
-        pc  = *(ros::topic::waitForMessage<sensor_msgs::PointCloud2>(topic_name));
-        ROS_INFO("AFTER");
-        if ((after == ros::Time(0,0)) || (pc.header.stamp > after))
-            found = true;
-        else
+        sensor_msgs::PointCloud2 pc;// = *(ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/kinect/cloud_throttled"));
+        bool found = false;
+        while (!found)
         {
-            ROS_ERROR("getCloud cloud too old : stamp %f , target time %f",pc.header.stamp.toSec(), after.toSec());
+
+            //pc  = *(ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/kinect/cloud_throttled"));
+            ROS_INFO("BEFORE");
+            pc  = *(ros::topic::waitForMessage<sensor_msgs::PointCloud2>(topic_name));
+            ROS_INFO("AFTER");
+            if ((after == ros::Time(0,0)) || (pc.header.stamp > after))
+                found = true;
+            else
+            {
+                ROS_ERROR("getKinectCloudXYZ cloud too old : stamp %f , target time %f",pc.header.stamp.toSec(), after.toSec());
+            }
+
         }
+        if (tm)
+            *tm = pc.header.stamp;
+
+        //sensor_msgs::PointCloud2 pct; //in map frame
+        could_convert = true;
+        try
+        {
+            pcl_ros::transformPointCloud(frame_id,pc,cloud_msg,*listener_);
+            cloud_msg.header.frame_id = frame_id.c_str();
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+
+            pcl::fromROSMsg(cloud_msg, *cloud);
+        }
+        catch (pcl::InvalidConversionException ex)
+        {
+            ROS_ERROR("caught an exception when trying to convert fresh point cloud to pcl type: %s", ex.what());
+            could_convert =false;
+        }
+
     }
-    if (tm)
-        *tm = pc.header.stamp;
-
-    //sensor_msgs::PointCloud2 pct; //in map frame
-
-    pcl_ros::transformPointCloud(frame_id,pc,cloud_msg,*listener_);
-    cloud_msg.header.frame_id = frame_id.c_str();
 
     //rosbag::Bag bag;
     //bag.open("single_cloud.bag", rosbag::bagmode::Write);
@@ -240,12 +258,13 @@ void pos_eigen_xy(const std::vector<tf::Vector3> &points, std::vector<tf::Vector
     evec.push_back(maxVec);
 }
 
-
+double color_divider = 1500;
+double mc_zdiv = 1;
 // z plus red/blue axis
 tf::Vector3 pcl_to_zcol(pcl::PointXYZRGB pt)
 {
-    return tf::Vector3(pt.z, (pt.b - pt.r) / 1500.0f, 0);
-    //return tf::Vector3(pt.z, 0, 0);
+    // return tf::Vector3(pt.z, (pt.b - pt.r) / 1500.0f, 0);
+    return tf::Vector3(pt.z, (pt.b - pt.r) / color_divider, 0);
 }
 
 void pos_eigen_zcol(std::vector<int> &idx, pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, std::vector<tf::Vector3> &evec, std::vector<double> &eval, bool print = false)
@@ -533,10 +552,17 @@ geometry_msgs::PoseArray classify_cloud(sensor_msgs::PointCloud2 msg, double del
 }
 
 
+ros::NodeHandle *nh_;
 
 // get the low objects that aren't much higher than the table
 geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double scaling = 20, double thickness = 0.04, tf::Vector3 min = tf::Vector3(-2.5,1,0), tf::Vector3 max = tf::Vector3(-1.5,2,2))
 {
+    double mc_thres = 50;
+    nh_->param<double>("mc_cdiv", color_divider, 1500 );
+    nh_->param<double>("mc_zdiv", mc_zdiv, 1 );
+    nh_->param<double>("mc_thres", mc_thres, 50 );
+
+    std::cout << "mc_cdiv " << color_divider << " mc_thres " << mc_thres << std::endl;
 
     tf::Vector3 size(ceil(max.x() - min.x()) * scaling, ceil(max.y() - min.y()) * scaling, 0); //ceil(max.z() - min.z()) * 100 / scaling);
 
@@ -806,7 +832,7 @@ geometry_msgs::PoseArray classify_cloud_low(sensor_msgs::PointCloud2 msg, double
                                     min_c = col;
                             }
                             col = (col - min_c) / (max_c - min_c) * 255;
-                            if ((t ==1) && (col > 50)) //!TODO: this is a magic threshold
+                            if ((t ==1) && (col > mc_thres)) //!TODO: this is a magic threshold
                             {
                                 tops->points[*it].r = 255;
                                 tops->points[*it].g = 0;
@@ -963,12 +989,17 @@ public:
         ros::Time time_stamp;
         sensor_msgs::PointCloud2 msg;
 
+        topic_name = "/camera/rgb/points";
         getCloud(msg, goal->frame_id, ros::Time(0), &time_stamp);
 
         result_.header.frame_id = goal->frame_id;
         result_.header.stamp = msg.header.stamp;
-        result_.high = classify_cloud(msg, goal->delta, goal->scaling, goal->pitch_limit);
-        result_.low = classify_cloud_low(msg, goal->scaling, goal->thickness);
+        tf::Vector3 min, max;
+        tf::pointMsgToTF(goal->aabb_min, min);
+        tf::pointMsgToTF(goal->aabb_max, max);
+
+        result_.high = classify_cloud(msg, goal->delta, goal->scaling, goal->pitch_limit, min, max);
+        result_.low = classify_cloud_low(msg, goal->scaling, goal->thickness, min, max);
 
         as_.setSucceeded(result_);
     }
@@ -983,6 +1014,7 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "mc_graspable", ros::init_options::AnonymousName);
 
     ros::NodeHandle nh;
+    nh_ = &nh;
 
     listener_ = new tf::TransformListener();
 
@@ -1146,7 +1178,8 @@ int main(int argc, char **argv)
                 getCloud(msg, "/map", ros::Time(0), &time_stamp);
                 //classify_cloud(msg,0.01);
                 classify_cloud(msg,0.02,20,0.4);
-                classify_cloud_low(msg, 20);
+                classify_cloud(msg, 0.04, 20, .4, tf::Vector3(.47,1.1,0), tf::Vector3(1,1.8,.9));
+                classify_cloud_low(msg, 20, 0.04, tf::Vector3(.47,1.1,0), tf::Vector3(1,1.8,.9));
             }
 
 

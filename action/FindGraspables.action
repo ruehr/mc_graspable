@@ -4,6 +4,8 @@ string frame_id
 # the frame_id of bb_min will be used to transform the cloud to, then bb_min and bb_max define the bounding box in that frame
 geometry_msgs/Point aabb_min
 geometry_msgs/Point aabb_max
+geometry_msgs/Point center
+float64 radius
 # parameters for detection of bowls and plates, usually 0.02 20 0.4
 float64 delta
 float64 scaling
